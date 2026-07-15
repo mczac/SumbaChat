@@ -21,17 +21,17 @@ typedef enum NCTextColorStyle {
 
 #pragma mark - App configuration
 
-NSString * const talkAppName = @"Nextcloud Talk";
+NSString * const talkAppName = @"SumbaChat";
 NSString * const filesAppName = @"Nextcloud";
 NSString * const copyright = @"© 2026 Nextcloud GmbH";
-NSString * const bundleIdentifier = @"com.nextcloud.Talk";
-NSString * const groupIdentifier = @"group.com.nextcloud.Talk";
-NSString * const appsGroupIdentifier = @"group.com.nextcloud.apps";
+NSString * const bundleIdentifier = @"com.spl.SumbaChat";
+NSString * const groupIdentifier = @"group.com.spl.SumbaChat";
+NSString * const appsGroupIdentifier = @"group.com.spl.apps";
 NSString * const pushNotificationServer = @"https://push-notifications.nextcloud.com";
 NSString * const privacyURL = @"https://nextcloud.com/privacy";
 BOOL const isBrandedApp = NO;
 BOOL const multiAccountEnabled = YES;
-BOOL const useAppsGroup = YES;
+BOOL const useAppsGroup = NO;
 BOOL const forceDomain = NO;
 NSString * const domain = nil;
 NSString * const appAlternateVersion = @"";

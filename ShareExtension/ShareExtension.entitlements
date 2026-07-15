@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.nextcloud.Talk</string>
+		<string>group.com.spl.SumbaChat</string>
 	</array>
 </dict>
 </plist>

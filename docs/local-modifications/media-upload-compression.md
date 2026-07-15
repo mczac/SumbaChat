@@ -14,10 +14,82 @@ Photos and videos are compressed before upload staging in `ShareItemController`.
 
 ## Behavior
 
-- **Photos** (except GIF): max dimension 2048px, JPEG quality 0.7
-- **Videos**: `AVAssetExportPresetMediumQuality` → `.mp4`
+- **Photos** (except GIF): server-configurable maximum dimension and JPEG quality
+- **Videos**: server-configurable export preset → `.mp4`
+- **Defaults without server settings**: images 1280px / JPEG quality 45; videos `low`
 - **GIF / pasted PNG**: unchanged
-- **Video compression failure**: falls back to original file
+- **Video compression failure or larger output**: falls back to original file
+
+## Server capability contract
+
+The app reads an effective compression policy from the authenticated OCS
+capabilities response:
+
+`GET /ocs/v1.php/cloud/capabilities?format=json`
+
+Add this object under
+`ocs.data.capabilities.spreed.config.attachments`:
+
+```json
+{
+  "upload-compression": {
+    "enabled": true,
+    "images": {
+      "enabled": true,
+      "max-dimension": 1280,
+      "jpeg-quality": 45
+    },
+    "videos": {
+      "enabled": true,
+      "preset": "low"
+    }
+  }
+}
+```
+
+### Parameters
+
+| Parameter | Type | Accepted values | App fallback |
+|-----------|------|-----------------|--------------|
+| `enabled` | boolean | `true`, `false` | `true` |
+| `images.enabled` | boolean | `true`, `false` | `true` |
+| `images.max-dimension` | integer pixels | `320...8192` | `1280` |
+| `images.jpeg-quality` | integer percent | `10...100` | `45` |
+| `videos.enabled` | boolean | `true`, `false` | `true` |
+| `videos.preset` | string | `low`, `medium`, `high`, `480p`, `720p`, `1080p`, `2160p` | `low` |
+
+Invalid or missing numeric and preset values use the app fallback. JSON values
+must use their documented types; numeric strings are not accepted.
+
+The response is already authenticated, so the server may return values merged
+from a server-wide admin policy and a per-user override. The iOS app stores the
+effective values per account and does not need to know where the server stored
+them.
+
+### Recommended server storage
+
+Store server-wide values in Nextcloud app config (`oc_appconfig`) under a
+custom app such as `talk_upload_policy`, and expose them through an
+`OCP\Capabilities\ICapability` provider. Nextcloud deep-merges capability
+providers, allowing the custom app to append this object to
+`spreed.config.attachments` without replacing Talk's existing attachment keys.
+
+Suggested app-config keys:
+
+- `enabled`
+- `image_enabled`
+- `image_max_dimension`
+- `image_jpeg_quality`
+- `video_enabled`
+- `video_preset`
+
+If an admin changes the policy, clients need a fresh capabilities response.
+Either include these settings in Talk's capabilities hash calculation or
+trigger/refetch capabilities in another reliable way.
+
+Changing the persisted capability model raised the shared Realm schema version
+to 91. Run the main app once after installing the build before invoking the
+share extension so the main app can migrate the shared Realm.
 
 ## Revert this feature only
 

@@ -7,7 +7,7 @@ import Foundation
 
 public let kTalkDatabaseFolder = "Library/Application Support/Talk"
 public let kTalkDatabaseFileName = "talk.realm"
-public let kTalkDatabaseSchemaVersion: UInt64 = 90
+public let kTalkDatabaseSchemaVersion: UInt64 = 91
 
 // Objective-C bridge for the Talk database constants that are still referenced from Objective-C code.
 // These reference the Swift values and can be removed once those call sites are migrated to Swift.
@@ -418,9 +418,22 @@ public extension Notification.Name {
 
         capabilities.setValue(capabilitiesDict["features"], forKey: "talkCapabilities")
         capabilities.hasTranslationProviders = ((config?["chat"] as? [String: Any])?["has-translation-providers"] as? NSNumber)?.boolValue ?? false
-        capabilities.attachmentsAllowed = ((config?["attachments"] as? [String: Any])?["allowed"] as? NSNumber)?.boolValue ?? false
-        capabilities.attachmentsFolder = (config?["attachments"] as? [String: Any])?["folder"] as? String ?? ""
-        capabilities.conversationSubfoldersEnabled = ((config?["attachments"] as? [String: Any])?["conversation-subfolders"] as? NSNumber)?.boolValue ?? false
+        let attachmentsConfig = config?["attachments"] as? [String: Any]
+        capabilities.attachmentsAllowed = (attachmentsConfig?["allowed"] as? NSNumber)?.boolValue ?? false
+        capabilities.attachmentsFolder = attachmentsConfig?["folder"] as? String ?? ""
+        capabilities.conversationSubfoldersEnabled = (attachmentsConfig?["conversation-subfolders"] as? NSNumber)?.boolValue ?? false
+
+        // Upload compression policy. The defaults preserve the app's aggressive
+        // compression behavior when the server does not advertise a policy.
+        let uploadCompressionConfig = attachmentsConfig?["upload-compression"] as? [String: Any]
+        let imageCompressionConfig = uploadCompressionConfig?["images"] as? [String: Any]
+        let videoCompressionConfig = uploadCompressionConfig?["videos"] as? [String: Any]
+        capabilities.uploadCompressionEnabled = (uploadCompressionConfig?["enabled"] as? NSNumber)?.boolValue ?? true
+        capabilities.imageCompressionEnabled = (imageCompressionConfig?["enabled"] as? NSNumber)?.boolValue ?? true
+        capabilities.imageMaxDimension = (imageCompressionConfig?["max-dimension"] as? NSNumber)?.intValue ?? 1280
+        capabilities.imageJPEGQuality = (imageCompressionConfig?["jpeg-quality"] as? NSNumber)?.intValue ?? 45
+        capabilities.videoCompressionEnabled = (videoCompressionConfig?["enabled"] as? NSNumber)?.boolValue ?? true
+        capabilities.videoCompressionPreset = videoCompressionConfig?["preset"] as? String ?? "low"
         capabilities.talkVersion = capabilitiesDict["version"] as? String ?? ""
 
         // Call capabilities

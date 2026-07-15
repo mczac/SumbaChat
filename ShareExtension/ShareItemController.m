@@ -13,6 +13,7 @@
 @property (nonatomic, strong) NSString *tempDirectoryPath;
 @property (nonatomic, strong) NSURL *tempDirectoryURL;
 @property (nonatomic, strong) NSMutableArray *internalShareItems;
+@property (nonatomic, strong) MediaUploadCompressionSettings *mediaUploadCompressionSettings;
 
 @end
 
@@ -20,8 +21,14 @@
 
 - (instancetype)init
 {
+    return [self initWithMediaUploadCompressionSettings:[[MediaUploadCompressionSettings alloc] init]];
+}
+
+- (instancetype)initWithMediaUploadCompressionSettings:(MediaUploadCompressionSettings *)settings
+{
     self = [super init];
     if (self) {
+        self.mediaUploadCompressionSettings = settings;
         self.internalShareItems = [[NSMutableArray alloc] init];
         [self initTempDirectory];
     }
@@ -105,7 +112,9 @@
     NSString *jpegName = [[fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"];
     NSURL *jpegURL = [self getFileLocalURL:jpegName];
 
-    if ([MediaUploadPreprocessor compressImageAtURL:fileLocalURL toDestinationURL:jpegURL]) {
+    if ([MediaUploadPreprocessor compressImageAtURL:fileLocalURL
+                                   toDestinationURL:jpegURL
+                                           settings:self.mediaUploadCompressionSettings]) {
         [NSFileManager.defaultManager removeItemAtURL:fileLocalURL error:nil];
         fileLocalURL = jpegURL;
         fileName = jpegName;
@@ -120,7 +129,10 @@
     NSURL *mp4URL = [self getFileLocalURL:mp4Name];
 
     __weak typeof(self) weakSelf = self;
-    [MediaUploadPreprocessor compressVideoAtURL:fileLocalURL toDestinationURL:mp4URL completion:^(BOOL success) {
+    [MediaUploadPreprocessor compressVideoAtURL:fileLocalURL
+                               toDestinationURL:mp4URL
+                                       settings:self.mediaUploadCompressionSettings
+                                     completion:^(BOOL success) {
         dispatch_async(dispatch_get_main_queue(), ^{
             ShareItemController *strongSelf = weakSelf;
             if (!strongSelf) {
@@ -185,7 +197,7 @@
 
 - (void)addItemWithImageAndName:(UIImage *)image withName:(NSString *)imageName
 {
-    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image];
+    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image settings:self.mediaUploadCompressionSettings];
     if (!jpegData) {
         NSLog(@"Failed to compress image for upload");
         return;
@@ -257,7 +269,9 @@
     NSString *extension = item.fileURL.pathExtension.lowercaseString;
     if (extension.length > 0 && [NCUtils isImageWithFileExtension:extension] && ![extension isEqualToString:@"gif"]) {
         NSURL *jpegURL = [self getFileLocalURL:[[item.fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"]];
-        if ([MediaUploadPreprocessor compressImageAtURL:item.fileURL toDestinationURL:jpegURL]) {
+        if ([MediaUploadPreprocessor compressImageAtURL:item.fileURL
+                                       toDestinationURL:jpegURL
+                                               settings:self.mediaUploadCompressionSettings]) {
             [NSFileManager.defaultManager removeItemAtPath:item.filePath error:nil];
             item.fileURL = jpegURL;
             item.filePath = jpegURL.path;
@@ -270,7 +284,7 @@
 
 - (void)updateItem:(ShareItem *)item withImage:(UIImage *)image
 {
-    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image];
+    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image settings:self.mediaUploadCompressionSettings];
     if (!jpegData) {
         NSLog(@"Failed to compress updated image for upload");
         return;

@@ -36,7 +36,8 @@ import MBProgressHUD
     public weak var delegate: ShareConfirmationViewControllerDelegate?
 
     public lazy var shareItemController: ShareItemController = {
-        let controller = ShareItemController()
+        let compressionSettings = MediaUploadCompressionSettings(talkCapabilities: serverCapabilities)
+        let controller = ShareItemController(mediaUploadCompressionSettings: compressionSettings)
         controller.delegate = self
 
         return controller

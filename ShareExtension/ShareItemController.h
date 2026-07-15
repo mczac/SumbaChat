@@ -9,6 +9,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class MediaUploadCompressionSettings;
 @class ShareItemController;
 @protocol ShareItemControllerDelegate <NSObject>
 
@@ -22,6 +23,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, weak) id<ShareItemControllerDelegate> delegate;
 @property (strong, nonatomic) NSArray<ShareItem *> *shareItems;
 
+- (instancetype)initWithMediaUploadCompressionSettings:(MediaUploadCompressionSettings *)settings NS_DESIGNATED_INITIALIZER;
+- (instancetype)init;
 - (void)addItemWithURL:(NSURL *)fileURL;
 - (void)addItemWithURLAndName:(NSURL *)fileURL withName:(NSString *)fileName;
 - (void)addItemWithImage:(UIImage *)image;
