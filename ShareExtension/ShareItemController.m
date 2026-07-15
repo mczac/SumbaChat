@@ -8,9 +8,6 @@
 #import "ShareItemController.h"
 #import "NextcloudTalk-Swift.h"
 
-//TODO: Should the quality be user-selectable?
-CGFloat const kShareItemControllerImageQuality = 0.7f;
-
 @interface ShareItemController ()
 
 @property (nonatomic, strong) NSString *tempDirectoryPath;
@@ -94,6 +91,59 @@ CGFloat const kShareItemControllerImageQuality = 0.7f;
     return success;
 }
 
+- (void)addShareItemWithLocalURL:(NSURL *)fileLocalURL fileName:(NSString *)fileName isImage:(BOOL)fileIsImage
+{
+    NSLog(@"Adding shareItem: %@ %@", fileName, fileLocalURL);
+
+    ShareItem *item = [ShareItem initWithURL:fileLocalURL withName:fileName withPlaceholderImage:[self getPlaceholderImageForFileURL:fileLocalURL] isImage:fileIsImage];
+    [self.internalShareItems addObject:item];
+    [self.delegate shareItemControllerItemsChanged:self];
+}
+
+- (void)finalizeImageItemFromLocalURL:(NSURL *)fileLocalURL fileName:(NSString *)fileName
+{
+    NSString *jpegName = [[fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"];
+    NSURL *jpegURL = [self getFileLocalURL:jpegName];
+
+    if ([MediaUploadPreprocessor compressImageAtURL:fileLocalURL toDestinationURL:jpegURL]) {
+        [NSFileManager.defaultManager removeItemAtURL:fileLocalURL error:nil];
+        fileLocalURL = jpegURL;
+        fileName = jpegName;
+    }
+
+    [self addShareItemWithLocalURL:fileLocalURL fileName:fileName isImage:YES];
+}
+
+- (void)finalizeVideoItemFromLocalURL:(NSURL *)fileLocalURL fileName:(NSString *)fileName
+{
+    NSString *mp4Name = [[fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"mp4"];
+    NSURL *mp4URL = [self getFileLocalURL:mp4Name];
+
+    __weak typeof(self) weakSelf = self;
+    [MediaUploadPreprocessor compressVideoAtURL:fileLocalURL toDestinationURL:mp4URL completion:^(BOOL success) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ShareItemController *strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+
+            NSURL *finalURL = fileLocalURL;
+            NSString *finalName = fileName;
+
+            if (success) {
+                [NSFileManager.defaultManager removeItemAtURL:fileLocalURL error:nil];
+                finalURL = mp4URL;
+                finalName = mp4Name;
+            } else {
+                [NSFileManager.defaultManager removeItemAtURL:mp4URL error:nil];
+                NSLog(@"Video compression failed, uploading original file");
+            }
+
+            [strongSelf addShareItemWithLocalURL:finalURL fileName:finalName isImage:NO];
+        });
+    }];
+}
+
 - (void)addItemWithURLAndName:(NSURL *)fileURL withName:(NSString *)fileName
 {
     NSURL *fileLocalURL = [self getFileLocalURL:fileName];
@@ -111,16 +161,20 @@ CGFloat const kShareItemControllerImageQuality = 0.7f;
         }
     }
 
-    NSLog(@"Adding shareItem: %@ %@", fileName, fileLocalURL);
-    
-    // Try to determine if the item is an image file
-    // This can happen when sharing an image from the native ios files app
-    NSString *extension = fileLocalURL.pathExtension;
-    BOOL fileIsImage = (extension && [NCUtils isImageWithFileExtension:extension]);
-    
-    ShareItem* item = [ShareItem initWithURL:fileLocalURL withName:fileName withPlaceholderImage:[self getPlaceholderImageForFileURL:fileLocalURL] isImage:fileIsImage];
-    [self.internalShareItems addObject:item];
-    [self.delegate shareItemControllerItemsChanged:self];
+    NSString *extension = fileLocalURL.pathExtension.lowercaseString;
+    BOOL fileIsImage = (extension.length > 0 && [NCUtils isImageWithFileExtension:extension]);
+
+    if (fileIsImage) {
+        [self finalizeImageItemFromLocalURL:fileLocalURL fileName:fileName];
+        return;
+    }
+
+    if (extension.length > 0 && [MediaUploadPreprocessor isVideoFileExtension:extension]) {
+        [self finalizeVideoItemFromLocalURL:fileLocalURL fileName:fileName];
+        return;
+    }
+
+    [self addShareItemWithLocalURL:fileLocalURL fileName:fileName isImage:fileIsImage];
 }
 
 - (void)addItemWithImage:(UIImage *)image
@@ -131,8 +185,14 @@ CGFloat const kShareItemControllerImageQuality = 0.7f;
 
 - (void)addItemWithImageAndName:(UIImage *)image withName:(NSString *)imageName
 {
-    NSData *jpegData = UIImageJPEGRepresentation(image, kShareItemControllerImageQuality);
-    [self addItemWithImageDataAndName:jpegData withName:imageName];
+    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image];
+    if (!jpegData) {
+        NSLog(@"Failed to compress image for upload");
+        return;
+    }
+
+    NSString *jpegName = [[imageName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"];
+    [self addItemWithImageDataAndName:jpegData withName:jpegName];
 }
 
 - (void)addItemWithImageDataAndName:(NSData *)data withName:(NSString *)imageName
@@ -193,13 +253,29 @@ CGFloat const kShareItemControllerImageQuality = 0.7f;
     }];
     
     NSLog(@"Updating shareItem: %@ %@", item.fileName, item.fileURL);
+
+    NSString *extension = item.fileURL.pathExtension.lowercaseString;
+    if (extension.length > 0 && [NCUtils isImageWithFileExtension:extension] && ![extension isEqualToString:@"gif"]) {
+        NSURL *jpegURL = [self getFileLocalURL:[[item.fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"]];
+        if ([MediaUploadPreprocessor compressImageAtURL:item.fileURL toDestinationURL:jpegURL]) {
+            [NSFileManager.defaultManager removeItemAtPath:item.filePath error:nil];
+            item.fileURL = jpegURL;
+            item.filePath = jpegURL.path;
+            item.fileName = jpegURL.lastPathComponent;
+        }
+    }
     
     [self.delegate shareItemControllerItemsChanged:self];
 }
 
 - (void)updateItem:(ShareItem *)item withImage:(UIImage *)image
 {
-    NSData *jpegData = UIImageJPEGRepresentation(image, kShareItemControllerImageQuality);
+    NSData *jpegData = [MediaUploadPreprocessor compressedJPEGDataFromImage:image];
+    if (!jpegData) {
+        NSLog(@"Failed to compress updated image for upload");
+        return;
+    }
+
     [jpegData writeToFile:item.filePath atomically:YES];
     
     NSLog(@"Updating shareItem with Image: %@ %@", item.fileName, item.fileURL);
