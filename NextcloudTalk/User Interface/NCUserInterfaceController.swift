@@ -9,13 +9,14 @@ import JDStatusBarNotification
 
 public typealias PresentCallControllerCompletionBlock = () -> Void
 
-@objcMembers class NCUserInterfaceController: NSObject, LoginViewControllerDelegate, AuthenticationViewControllerDelegate {
+@objcMembers class NCUserInterfaceController: NSObject, LoginViewControllerDelegate, AuthenticationViewControllerDelegate, SumbaLoginViewControllerDelegate {
 
     var mainViewController: NCSplitViewController!
     var roomsTableViewController: RoomsTableViewController!
 
     private var loginViewController: LoginViewController?
     private var authViewController: AuthenticationViewController?
+    private var sumbaLoginViewController: SumbaLoginViewController?
     private var pendingPushNotification: NCPushNotification?
     private var pendingCallKitCall: [String: Any]?
     private var pendingLocalNotification: [AnyHashable: Any]?
@@ -48,7 +49,7 @@ public typealias PresentCallControllerCompletionBlock = () -> Void
     }
 
     func presentLoginViewController(forServerURL serverURL: String?, withUser user: String?) {
-        if forceDomain.boolValue, let authViewController = AuthenticationViewController(serverUrl: domain) {
+        if forceDomain.boolValue {
             // Don't open a login if we're in a call
             if NCRoomsManager.shared.callViewController != nil {
                 return
@@ -59,11 +60,16 @@ public typealias PresentCallControllerCompletionBlock = () -> Void
                 presentConversationsList()
             }
 
-            authViewController.delegate = self
-            let authenticationNC = UINavigationController(rootViewController: authViewController)
-            authenticationNC.modalPresentationStyle = NCDatabaseManager.sharedInstance().numberOfAccounts() == 0 ? .fullScreen : .automatic
-            self.authViewController = authViewController
-            mainViewController.present(authenticationNC, animated: true)
+            guard mainViewController.presentedViewController == nil else {
+                return
+            }
+
+            let sumbaLoginViewController = SumbaLoginViewController(serverURL: domain)
+            sumbaLoginViewController.delegate = self
+            let navigationController = UINavigationController(rootViewController: sumbaLoginViewController)
+            navigationController.modalPresentationStyle = NCDatabaseManager.sharedInstance().numberOfAccounts() == 0 ? .fullScreen : .formSheet
+            self.sumbaLoginViewController = sumbaLoginViewController
+            mainViewController.present(navigationController, animated: true)
         } else {
             // Don't open a login if we're in a call
             if NCRoomsManager.shared.callViewController != nil {
@@ -482,6 +488,17 @@ public typealias PresentCallControllerCompletionBlock = () -> Void
         mainViewController.dismiss(animated: true) {
             NCConnectionController.shared.checkAppState()
             // Get server capabilities again to check if user is allowed to use Nextcloud Talk
+            let activeAccount = NCDatabaseManager.sharedInstance().activeAccount()
+            NCSettingsController.sharedInstance().getCapabilitiesForAccountId(activeAccount.accountId, withCompletionBlock: nil)
+        }
+    }
+
+    // MARK: - SumbaLoginViewControllerDelegate
+
+    func sumbaLoginViewControllerDidFinish(_ viewController: SumbaLoginViewController) {
+        mainViewController.dismiss(animated: true) {
+            self.sumbaLoginViewController = nil
+            NCConnectionController.shared.checkAppState()
             let activeAccount = NCDatabaseManager.sharedInstance().activeAccount()
             NCSettingsController.sharedInstance().getCapabilitiesForAccountId(activeAccount.accountId, withCompletionBlock: nil)
         }

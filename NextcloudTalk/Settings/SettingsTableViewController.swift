@@ -636,7 +636,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         if settingsSection == SettingsSection.kSettingsSectionAbout.rawValue {
             let appName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)!
 
-            return "\(appName) \(NCAppBranding.getAppVersionString())\n\(copyright)"
+            return "\(appName) \(NCAppBranding.getAppVersionString())\n\(copyright)\n\(licenseNotice)"
         }
 
         if settingsSection == SettingsSection.kSettingsSectionAccountSettings.rawValue && contactSyncSwitch.isOn {

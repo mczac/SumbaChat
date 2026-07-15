@@ -94,9 +94,12 @@ share extension so the main app can migrate the shared Realm.
 ## Branded login
 
 SumbaChat locks login to `https://cloud.example.com` via `forceDomain` in
-`NCAppBranding.m`. The server-address screen is skipped and authentication
-opens directly. Nextcloud's "Grant access" step remains required to create a
-per-device app password and cannot be removed client-side.
+`NCAppBranding.m`. `SumbaLoginViewController` presents native username and
+password fields in a keyboard-safe scroll view. It exchanges those credentials
+for a per-device app password through `/ocs/v2.php/core/getapppassword`, stores
+only the app password in Keychain, clears the entered password after success,
+and skips the server-address/web authorization screens. This flow assumes 2FA
+is not required by the server.
 
 ## Preparing media HUD
 
