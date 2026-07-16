@@ -470,6 +470,9 @@ import MBProgressHUD
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
+        // Provider load may have started before presentation — re-assert Loading media… HUD.
+        self.updateStagingProgressHUD()
+
         if self.shareType == .text {
             // When we are sharing a text, we want to start editing right away
             self.shareTextView.becomeFirstResponder()
@@ -508,9 +511,9 @@ import MBProgressHUD
     }
 
     public override func canPressRightButton() -> Bool {
-        // Allow sending media without caption text, but not while preparation/upload is running.
+        // Allow sending media without caption text, but not while load/prepare/upload is running.
         return !self.shareItemController.shareItems.isEmpty
-            && self.shareItemController.preparingItemCount == 0
+            && !self.shareItemController.isBusyLoadingMedia
             && !self.isPreparingForUpload
             && !self.isUploadingMedia
     }
@@ -697,12 +700,12 @@ import MBProgressHUD
 
     private func updateCompressionOptionsUI() {
         // Wait until at least one item is staged so we don't overlap the toolbar with empty Zero KB chips.
-        // Also wait until staging finishes — opening chips + JPEG estimates mid-staging jetsams the Share Extension.
-        let stagingDone = self.shareItemController.preparingItemCount == 0
+        // Also wait until provider load + staging finish — mid-load chips jetsam / show fake sizes.
+        let loadingDone = !self.shareItemController.isBusyLoadingMedia
         let showQuality = self.mediaUploadMode == .chooseOnUpload
             && self.shareType == .item
             && !self.shareItemController.shareItems.isEmpty
-            && stagingDone
+            && loadingDone
 
         self.compressionSectionView.isHidden = !showQuality
         self.compressionSectionHeightConstraint?.constant = showQuality ? 82 : 0
@@ -761,11 +764,16 @@ import MBProgressHUD
     }
 
     private enum UploadHUDPhase {
+        /// Provider / iCloud / local staging copy (before preview is ready).
+        case loadingMedia
+        /// Send-path compression.
         case preparing
         case uploading(count: Int)
 
         var title: String {
             switch self {
+            case .loadingMedia:
+                return NSLocalizedString("Loading media…", comment: "Shown while shared/picked media is loaded from Photos or another app")
             case .preparing:
                 return NSLocalizedString("Preparing…", comment: "Shown while media is compressed before upload")
             case .uploading:
@@ -775,6 +783,8 @@ import MBProgressHUD
 
         var details: String {
             switch self {
+            case .loadingMedia:
+                return ""
             case .preparing:
                 // Keep a second line so label Y matches the Uploading phase.
                 return "\u{00a0}"
@@ -1519,8 +1529,17 @@ import MBProgressHUD
 
     public func shareItemControllerItemsChanged(_ shareItemController: ShareItemController) {
         DispatchQueue.main.async {
-            if shareItemController.shareItems.isEmpty && shareItemController.preparingItemCount == 0 {
+            // Never dismiss while provider load / staging is still in flight (empty sheet during iCloud).
+            if shareItemController.shareItems.isEmpty
+                && !shareItemController.isBusyLoadingMedia
+                && !self.isPreparingForUpload
+                && !self.isUploadingMedia {
                 if self.finishingSuccessfulUpload {
+                    return
+                }
+                // Failure alert owns dismiss when load failed with zero items.
+                if self.isPresentingStagingFailureAlert {
+                    self.updateStagingProgressHUD()
                     return
                 }
                 NCLog.log("ShareConfirmation: items empty — cancelling share sheet")
@@ -1554,8 +1573,8 @@ import MBProgressHUD
             self.updateStagingProgressHUD()
             self.updateSendButtonEnabledState()
             self.textDidUpdate(false)
-            // Staging finished — reveal Choose-on-upload chips without mid-copy JPEG work.
-            if shareItemController.preparingItemCount == 0 {
+            // Load + staging finished — reveal Choose-on-upload chips without mid-copy JPEG work.
+            if !shareItemController.isBusyLoadingMedia {
                 self.updateCompressionOptionsUI()
             }
         }
@@ -1607,21 +1626,22 @@ import MBProgressHUD
         self.present(alert, animated: true)
     }
 
-    /// Progress while copying/staging media into the sheet (before Send).
+    /// Progress while loading from Photos/share provider or staging into the sheet (before Send).
     private func updateStagingProgressHUD() {
-        if self.isPreparingForUpload {
-            // Send-path prepare uses the combined annular HUD already shown by prepareMediaThenUpload.
+        if self.isPreparingForUpload || self.isUploadingMedia {
+            // Send-path Preparing/Uploading owns the annular HUD.
             self.updateSendButtonEnabledState()
             return
         }
 
-        if self.shareItemController.preparingItemCount > 0 {
-            self.showProgressHUD(phase: .preparing,
+        if self.shareItemController.isBusyLoadingMedia {
+            // Element-style: spinner for the whole provider → local-copy window (avoids empty sheet).
+            self.showProgressHUD(phase: .loadingMedia,
                                  progress: nil,
                                  indeterminate: true,
                                  overMedia: false)
         } else if self.hud?.mode == .indeterminate {
-            // Staging finished — dismiss the load spinner whether or not items appeared.
+            // Load/staging finished — dismiss spinner whether or not items appeared.
             self.hideProgressHUD()
         }
 

@@ -1699,13 +1699,22 @@ import Toast
         shareConfirmationVC.setChatMessage(self.textView.text)
         self.setChatMessage("")
 
+        // Start Loading media… before dismiss so the confirmation sheet never appears empty (Element-style).
+        let items = shareConfirmationVC.shareItemController
+        for result in results {
+            let provider = result.itemProvider
+            if provider.hasItemConformingToTypeIdentifier("public.image")
+                || provider.hasItemConformingToTypeIdentifier("public.movie") {
+                items.beginProviderLoad()
+            }
+        }
+
         picker.dismiss(animated: true) {
             self.present(navigationController, animated: true) {
                 for result in results {
                     let provider = result.itemProvider
-
+                    // One type per result — avoids double-load / unbalanced endProviderLoad.
                     if provider.hasItemConformingToTypeIdentifier("public.image") {
-                        // Owned temp file — copy must finish before this handler returns (ShareItemController does).
                         provider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, error in
                             if let url {
                                 // Keep real container extension (heic/png/jpeg); don't force .jpg.
@@ -1716,20 +1725,24 @@ import Toast
                                 } else {
                                     fileName = "IMG_\(String(Date().timeIntervalSince1970 * 1000)).\(ext)"
                                 }
-                                if shareConfirmationVC.shareItemController.addItem(withURLAndName: url, withName: fileName) {
+                                if items.addItem(withURLAndName: url, withName: fileName) {
                                     NCLog.log("PHPicker: staged image via loadFileRepresentation \(fileName)")
+                                    items.endProviderLoad()
                                     return
                                 }
                                 NCLog.log("PHPicker: image fileRepresentation copy failed for \(fileName)")
                             } else {
                                 NCLog.log("PHPicker: loadFileRepresentation(image) failed: \(error?.localizedDescription ?? "nil")")
                             }
-                            // Safe fallback — JPEG from decoded bitmap (still non-empty).
-                            shareConfirmationVC.shareItemController.addImage(from: provider)
+                            // Fallback is async — end provider-load only when it finishes.
+                            items.addImage(from: provider) { success in
+                                if !success {
+                                    items.reportStagingFailure(withName: NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load"))
+                                }
+                                items.endProviderLoad()
+                            }
                         }
-                    }
-
-                    if provider.hasItemConformingToTypeIdentifier("public.movie") {
+                    } else if provider.hasItemConformingToTypeIdentifier("public.movie") {
                         provider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, error in
                             if let url {
                                 let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension.lowercased()
@@ -1739,8 +1752,9 @@ import Toast
                                 } else {
                                     fileName = "VID_\(String(Date().timeIntervalSince1970 * 1000)).\(ext)"
                                 }
-                                if shareConfirmationVC.shareItemController.addItem(withURLAndName: url, withName: fileName) {
+                                if items.addItem(withURLAndName: url, withName: fileName) {
                                     NCLog.log("PHPicker: staged video via loadFileRepresentation \(fileName)")
+                                    items.endProviderLoad()
                                     return
                                 }
                                 NCLog.log("PHPicker: video fileRepresentation copy failed for \(fileName)")
@@ -1748,9 +1762,10 @@ import Toast
                                 NCLog.log("PHPicker: loadFileRepresentation(movie) failed: \(error?.localizedDescription ?? "nil")")
                             }
                             provider.loadItem(forTypeIdentifier: "public.movie", options: nil) { item, loadError in
+                                defer { items.endProviderLoad() }
                                 guard let item = item as? URL else {
                                     NCLog.log("PHPicker: video loadItem failed: \(loadError?.localizedDescription ?? "unknown")")
-                                    shareConfirmationVC.shareItemController.reportStagingFailure(withName: NSLocalizedString("Video", comment: "Generic name when a shared video failed to load"))
+                                    items.reportStagingFailure(withName: NSLocalizedString("Video", comment: "Generic name when a shared video failed to load"))
                                     return
                                 }
                                 let ext = item.pathExtension.isEmpty ? "mov" : item.pathExtension.lowercased()
@@ -1760,11 +1775,11 @@ import Toast
                                 } else {
                                     fileName = "VID_\(String(Date().timeIntervalSince1970 * 1000)).\(ext)"
                                 }
-                                if shareConfirmationVC.shareItemController.addItem(withURLAndName: item, withName: fileName) {
+                                if items.addItem(withURLAndName: item, withName: fileName) {
                                     NCLog.log("PHPicker: staged video via loadItem \(fileName)")
                                 } else {
                                     NCLog.log("PHPicker: video loadItem copy failed for \(fileName)")
-                                    shareConfirmationVC.shareItemController.reportStagingFailure(withName: fileName)
+                                    items.reportStagingFailure(withName: fileName)
                                 }
                             }
                         }

@@ -26,6 +26,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, weak) id<ShareItemControllerDelegate> delegate;
 @property (strong, nonatomic) NSArray<ShareItem *> *shareItems;
 @property (nonatomic, readonly) NSInteger preparingItemCount;
+/// Count of in-flight NSItemProvider / PHPicker loads (iCloud download, etc.).
+@property (nonatomic, readonly) NSInteger pendingProviderLoadCount;
+/// YES while provider load or local staging copy is still running (before Send).
+@property (nonatomic, readonly) BOOL isBusyLoadingMedia;
 
 - (instancetype)initWithMediaUploadCompressionSettings:(MediaUploadCompressionSettings *)settings NS_DESIGNATED_INITIALIZER;
 - (instancetype)init;
@@ -34,7 +38,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)addItemWithURLAndName:(NSURL *)fileURL withName:(NSString *)fileName;
 /// Photos / share fallback when file-URL staging fails: file representation → UIImage → loadItem.
 - (void)addImageFromItemProvider:(NSItemProvider *)itemProvider;
+/// Same as above; `completion` is always called on the main thread (success = staged at least one image).
+- (void)addImageFromItemProvider:(NSItemProvider *)itemProvider completion:(void (^ _Nullable)(BOOL success))completion;
 - (void)addItemWithImage:(UIImage *)image;
+/// Call on the main thread before starting `loadFileRepresentation` / provider work; pair with `endProviderLoad`.
+- (void)beginProviderLoad;
+- (void)endProviderLoad;
 - (void)addItemWithImageAndName:(UIImage *)image withName:(NSString *)imageName;
 - (void)addItemWithImageDataAndName:(NSData *)data withName:(NSString *)imageName;
 - (void)addItemWithContactData:(NSData *)data;

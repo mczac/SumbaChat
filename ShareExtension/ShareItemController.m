@@ -16,6 +16,7 @@
 @property (nonatomic, strong) MediaUploadCompressionSettings *stagingSettings;
 @property (nonatomic, strong) dispatch_queue_t preparationQueue;
 @property (nonatomic, assign, readwrite) NSInteger preparingItemCount;
+@property (nonatomic, assign, readwrite) NSInteger pendingProviderLoadCount;
 @property (nonatomic, strong) NSMutableArray<NSString *> *pendingStagingFailures;
 @property (nonatomic, strong) MediaUploadPreparationToken *activePreparationToken;
 
@@ -82,8 +83,48 @@
 
     self.preparingItemCount -= 1;
     [self.delegate shareItemControllerPreparingItemsChanged:self];
-    if (self.preparingItemCount == 0) {
+    if (self.preparingItemCount == 0 && self.pendingProviderLoadCount == 0) {
         [self flushPendingStagingFailures];
+    }
+}
+
+- (BOOL)isBusyLoadingMedia
+{
+    return self.pendingProviderLoadCount > 0 || self.preparingItemCount > 0;
+}
+
+- (void)beginProviderLoad
+{
+    void (^bump)(void) = ^{
+        self.pendingProviderLoadCount += 1;
+        [NCLog log:[NSString stringWithFormat:@"ShareItemController: beginProviderLoad (pending=%ld)", (long)self.pendingProviderLoadCount]];
+        [self.delegate shareItemControllerPreparingItemsChanged:self];
+    };
+    if ([NSThread isMainThread]) {
+        bump();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), bump);
+    }
+}
+
+- (void)endProviderLoad
+{
+    void (^drop)(void) = ^{
+        if (self.pendingProviderLoadCount <= 0) {
+            [NCLog log:@"ShareItemController: endProviderLoad ignored (already 0)"];
+            return;
+        }
+        self.pendingProviderLoadCount -= 1;
+        [NCLog log:[NSString stringWithFormat:@"ShareItemController: endProviderLoad (pending=%ld)", (long)self.pendingProviderLoadCount]];
+        [self.delegate shareItemControllerPreparingItemsChanged:self];
+        if (self.pendingProviderLoadCount == 0 && self.preparingItemCount == 0) {
+            [self flushPendingStagingFailures];
+        }
+    };
+    if ([NSThread isMainThread]) {
+        drop();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), drop);
     }
 }
 
@@ -93,7 +134,7 @@
     void (^record)(void) = ^{
         [self.pendingStagingFailures addObject:name];
         [NCLog log:[NSString stringWithFormat:@"ShareItemController: staging failure recorded for %@", name]];
-        if (self.preparingItemCount == 0) {
+        if (self.preparingItemCount == 0 && self.pendingProviderLoadCount == 0) {
             [self flushPendingStagingFailures];
         }
     };
@@ -343,8 +384,27 @@
 
 - (void)addImageFromItemProvider:(NSItemProvider *)itemProvider
 {
+    [self addImageFromItemProvider:itemProvider completion:nil];
+}
+
+- (void)addImageFromItemProvider:(NSItemProvider *)itemProvider completion:(void (^)(BOOL success))completion
+{
+    void (^finish)(BOOL) = ^(BOOL success) {
+        if (!completion) {
+            return;
+        }
+        if ([NSThread isMainThread]) {
+            completion(success);
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(success);
+            });
+        }
+    };
+
     if (!itemProvider || ![itemProvider hasItemConformingToTypeIdentifier:(NSString *)kUTTypeImage]) {
         [NCLog log:@"ShareItemController: image fallback skipped — provider has no image type"];
+        finish(NO);
         return;
     }
 
@@ -353,6 +413,7 @@
                                          completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
         ShareItemController *strongSelf = weakSelf;
         if (!strongSelf) {
+            finish(NO);
             return;
         }
 
@@ -361,6 +422,7 @@
             // Must copy before this handler returns — system deletes the representation file.
             if ([strongSelf addItemWithURLAndName:url withName:name]) {
                 [NCLog log:[NSString stringWithFormat:@"ShareItemController: image fallback staged file representation %@", name]];
+                finish(YES);
                 return;
             }
             [NCLog log:[NSString stringWithFormat:@"ShareItemController: image file representation copy failed (%@)", error.localizedDescription ?: @"empty"]];
@@ -372,11 +434,13 @@
         [itemProvider loadObjectOfClass:[UIImage class] completionHandler:^(UIImage * _Nullable image, NSError * _Nullable imageError) {
             ShareItemController *innerSelf = weakSelf;
             if (!innerSelf) {
+                finish(NO);
                 return;
             }
             if (image != nil) {
                 [NCLog log:@"ShareItemController: image fallback staged via UIImage"];
                 [innerSelf addItemWithImage:image];
+                finish(YES);
                 return;
             }
 
@@ -385,26 +449,36 @@
                                   completionHandler:^(id<NSSecureCoding>  _Nullable item, NSError * _Null_unspecified loadError) {
                 ShareItemController *loadSelf = weakSelf;
                 if (!loadSelf) {
+                    finish(NO);
                     return;
                 }
                 if ([(NSObject *)item isKindOfClass:[UIImage class]]) {
                     [NCLog log:@"ShareItemController: image fallback staged via loadItem UIImage"];
                     [loadSelf addItemWithImage:(UIImage *)item];
+                    finish(YES);
                 } else if ([(NSObject *)item isKindOfClass:[NSData class]]) {
                     UIImage *fromData = [UIImage imageWithData:(NSData *)item];
                     if (fromData) {
                         [NCLog log:@"ShareItemController: image fallback staged via loadItem NSData"];
                         [loadSelf addItemWithImage:fromData];
+                        finish(YES);
                     } else {
                         [NCLog log:@"ShareItemController: image fallback NSData could not decode"];
+                        [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                        finish(NO);
                     }
                 } else if ([(NSObject *)item isKindOfClass:[NSURL class]]) {
                     [NCLog log:@"ShareItemController: image fallback trying loadItem URL"];
-                    [loadSelf addItemWithURL:(NSURL *)item];
+                    BOOL ok = [loadSelf addItemWithURL:(NSURL *)item];
+                    if (!ok) {
+                        [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                    }
+                    finish(ok);
                 } else {
                     [NCLog log:[NSString stringWithFormat:@"ShareItemController: all image fallbacks failed (%@)",
                                 loadError.localizedDescription ?: imageError.localizedDescription ?: @"unknown"]];
                     [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                    finish(NO);
                 }
             }];
         }];

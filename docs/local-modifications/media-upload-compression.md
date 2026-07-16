@@ -101,3 +101,6 @@ Unchanged (GIF skipped; pasted PNG data path unchanged).
   `URLSessionTask.cancel()` — prepare completion must not start PUT after Cancel.
 - **Large video hitch:** staging copy always runs on `preparationQueue`
   (`dispatch_sync` so `loadFileRepresentation` still finishes before return).
+- **Loading media…:** spinner from `beginProviderLoad` (provider / iCloud)
+  through local staging (`isBusyLoadingMedia`), then **Preparing…** on Send,
+  then **Uploading**. Chips / Send / auto-dismiss wait until load finishes.
