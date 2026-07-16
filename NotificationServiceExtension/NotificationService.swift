@@ -17,6 +17,7 @@ class NotificationService: UNNotificationServiceExtension {
     private func configureDatabase() -> Bool {
         // Configure database
         guard let containerBase = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupIdentifier) else {
+            print("App Group container unavailable for \(groupIdentifier). Notification Service Extension is not entitled.")
             return false
         }
 

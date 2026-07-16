@@ -25,6 +25,22 @@ again when APNs supplies its tokens. During testing, verify both
 `Subscribed to NC server successfully.` and
 `Subscribed to Push Notification server successfully.` in the app log.
 
+### App Group (`group.com.spl.SumbaChat`)
+
+The main app and every extension share Realm/keychain data through the App Group
+`group.com.spl.SumbaChat`. That group must appear in each target's entitlements
+and in the signed provisioning profile.
+
+A Console line like
+`container_create_or_lookup_app_group_path_by_app_group_identifier: client is not entitled`
+is often noise when the shared container still works. Treat it as a real failure
+only if you also see:
+
+`App Group container unavailable for group.com.spl.SumbaChat…`
+
+In that case: delete the app from the device, clean build in Xcode, then reinstall
+so every target picks up a profile that includes the App Group.
+
 # 📱 Users
 Please make sure you're using the latest version available on the AppStore. Push notifications are not available if you're compiling and installing the app yourself through XCode.
 

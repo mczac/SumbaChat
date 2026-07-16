@@ -134,9 +134,11 @@ public extension Notification.Name {
     override private init() {
         super.init()
 
-        guard let path = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupIdentifier)?.appendingPathComponent(kTalkDatabaseFolder).path else {
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupIdentifier) else {
+            NCLog.log("App Group container unavailable for \(groupIdentifier). Check that App Groups is enabled for every target and the provisioning profile includes \(groupIdentifier).")
             return
         }
+        let path = containerURL.appendingPathComponent(kTalkDatabaseFolder).path
 
         // Create Talk database directory
         if !FileManager.default.fileExists(atPath: path) {

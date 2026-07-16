@@ -23,25 +23,24 @@ import UIKit
         return URLSession(configuration: configuration)
     }()
 
-    private lazy var logoImageView: UIImageView = {
-        let imageView = UIImageView(image: UIImage(named: "sumbaLoginLogo") ?? UIImage(systemName: "bubble.left.and.bubble.right.fill"))
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.contentMode = .scaleAspectFit
-        imageView.layer.cornerCurve = .continuous
-        imageView.clipsToBounds = true
-        // Compress first when vertical space is tight.
-        imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
-        return imageView
+    private lazy var scrollView: UIScrollView = {
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.keyboardDismissMode = .interactive
+        scroll.alwaysBounceVertical = true
+        scroll.showsVerticalScrollIndicator = false
+        return scroll
     }()
 
-    private lazy var logoContainer: UIView = {
-        let container = UIView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(logoImageView)
-        container.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        container.setContentHuggingPriority(.defaultLow, for: .vertical)
-        return container
+    private lazy var logoImageView: UIImageView = {
+        let image = (UIImage(named: "sumbaLoginLogo") ?? UIImage(systemName: "bubble.left.and.bubble.right.fill"))?
+            .withRenderingMode(.alwaysTemplate)
+        let imageView = UIImageView(image: image)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        // Adapts with the interface: white on the dark login background.
+        imageView.tintColor = .label
+        return imageView
     }()
 
     private lazy var titleLabel: UILabel = {
@@ -52,7 +51,6 @@ import UIKit
         label.minimumScaleFactor = 0.75
         label.textAlignment = .center
         label.text = "SumbaChat"
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
         return label
     }()
 
@@ -66,7 +64,6 @@ import UIKit
         label.adjustsFontSizeToFitWidth = true
         label.minimumScaleFactor = 0.75
         label.text = NSLocalizedString("Enter your username and password to continue", comment: "")
-        label.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         return label
     }()
 
@@ -110,6 +107,8 @@ import UIKit
         configuration.cornerStyle = .large
         configuration.baseBackgroundColor = NCAppBranding.brandColor()
         configuration.baseForegroundColor = NCAppBranding.brandTextColor()
+        // Space between the activity indicator and the title while logging in.
+        configuration.imagePadding = 10
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
             attributes.font = .systemFont(ofSize: 18, weight: .semibold)
@@ -125,7 +124,6 @@ import UIKit
 
     private lazy var errorLabel: UILabel = {
         let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .preferredFont(forTextStyle: .footnote)
         label.textColor = .systemRed
         label.numberOfLines = 0
@@ -146,26 +144,20 @@ import UIKit
         return label
     }()
 
-    /// Prefer roomy gaps; Auto Layout may compress them when the keyboard is up.
-    private lazy var afterLogoSpacer = makeSpacer(preferred: 14, minimum: 6)
-    private lazy var afterTitleSpacer = makeSpacer(preferred: 6, minimum: 2)
-    private lazy var afterSubtitleSpacer = makeSpacer(preferred: 28, minimum: 8)
-    private lazy var afterUsernameSpacer = makeSpacer(preferred: 12, minimum: 8)
-    private lazy var beforeButtonSpacer = makeSpacer(preferred: 18, minimum: 8)
-
     private lazy var formStack: UIStackView = {
         let stack = UIStackView(arrangedSubviews: [
-            logoContainer,
-            afterLogoSpacer,
+            logoImageView,
+            makeGap(20),
             titleLabel,
-            afterTitleSpacer,
+            makeGap(6),
             subtitleLabel,
-            afterSubtitleSpacer,
+            makeGap(28),
             usernameTextField,
-            afterUsernameSpacer,
+            makeGap(12),
             passwordTextField,
+            makeGap(10),
             errorLabel,
-            beforeButtonSpacer,
+            makeGap(18),
             loginButton
         ])
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -188,13 +180,7 @@ import UIKit
         super.viewDidLoad()
         configureView()
         registerForKeyboardNotifications()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let side = logoImageView.bounds.width
-        guard side > 0 else { return }
-        logoImageView.layer.cornerRadius = min(18, side * 0.2)
+        updateLoginButtonState()
     }
 
     deinit {
@@ -215,43 +201,29 @@ import UIKit
             )
         }
 
-        view.addSubview(formStack)
+        view.addSubview(scrollView)
+        scrollView.addSubview(formStack)
         view.addSubview(copyrightLabel)
 
-        let stackFillWidth = formStack.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -40)
-        stackFillWidth.priority = .defaultHigh
+        let frameGuide = scrollView.frameLayoutGuide
+        let contentGuide = scrollView.contentLayoutGuide
 
-        // Prefer a roomy top inset; allow it to compress slightly on short screens.
-        let preferredTop = formStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24)
-        preferredTop.priority = .defaultHigh
-        let minimumTop = formStack.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
-
-        // Keep the form clear of the keyboard. Compression happens on logo/spacers first.
-        let keyboardClearance = formStack.bottomAnchor.constraint(
-            lessThanOrEqualTo: view.keyboardLayoutGuide.topAnchor,
-            constant: -12
-        )
-
-        let preferredLogoHeight = logoContainer.heightAnchor.constraint(equalToConstant: 88)
-        preferredLogoHeight.priority = .defaultHigh
-        let minimumLogoHeight = logoContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 52)
-
+        // A fixed-size layout inside a scroll view: the keyboard only adjusts the
+        // content inset, so nothing resizes or jumps when moving between fields.
         NSLayoutConstraint.activate([
-            stackFillWidth,
-            preferredTop,
-            minimumTop,
-            formStack.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
-            formStack.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
-            formStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            formStack.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
-            keyboardClearance,
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
 
-            preferredLogoHeight,
-            minimumLogoHeight,
-            logoImageView.heightAnchor.constraint(equalTo: logoContainer.heightAnchor),
+            formStack.topAnchor.constraint(equalTo: contentGuide.topAnchor, constant: 32),
+            formStack.bottomAnchor.constraint(equalTo: contentGuide.bottomAnchor, constant: -24),
+            formStack.centerXAnchor.constraint(equalTo: contentGuide.centerXAnchor),
+            formStack.widthAnchor.constraint(equalTo: frameGuide.widthAnchor, constant: -40),
+            formStack.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
+
+            logoImageView.heightAnchor.constraint(equalToConstant: 96),
             logoImageView.widthAnchor.constraint(equalTo: logoImageView.heightAnchor),
-            logoImageView.centerXAnchor.constraint(equalTo: logoContainer.centerXAnchor),
-            logoImageView.centerYAnchor.constraint(equalTo: logoContainer.centerYAnchor),
 
             usernameTextField.heightAnchor.constraint(equalToConstant: 52),
             passwordTextField.heightAnchor.constraint(equalToConstant: 52),
@@ -264,19 +236,13 @@ import UIKit
 
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tapGesture.cancelsTouchesInView = false
-        view.addGestureRecognizer(tapGesture)
+        scrollView.addGestureRecognizer(tapGesture)
     }
 
-    private func makeSpacer(preferred: CGFloat, minimum: CGFloat) -> UIView {
+    private func makeGap(_ height: CGFloat) -> UIView {
         let spacer = UIView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-
-        let preferredHeight = spacer.heightAnchor.constraint(equalToConstant: preferred)
-        preferredHeight.priority = .defaultHigh
-        let minimumHeight = spacer.heightAnchor.constraint(greaterThanOrEqualToConstant: minimum)
-        NSLayoutConstraint.activate([preferredHeight, minimumHeight])
+        spacer.heightAnchor.constraint(equalToConstant: height).isActive = true
         return spacer
     }
 
@@ -294,12 +260,15 @@ import UIKit
         field.autocapitalizationType = .none
         field.clearButtonMode = .whileEditing
         field.returnKeyType = .next
+        // Return key stays dimmed until the field has content.
+        field.enablesReturnKeyAutomatically = true
         field.borderStyle = .none
         field.backgroundColor = .secondarySystemBackground
         field.layer.cornerRadius = 12
         field.layer.borderWidth = 1
         field.layer.borderColor = UIColor.separator.cgColor
         field.setContentCompressionResistancePriority(.required, for: .vertical)
+        field.addTarget(self, action: #selector(textFieldEditingChanged), for: .editingChanged)
 
         let icon = UIImageView(image: UIImage(systemName: systemImage))
         icon.tintColor = .secondaryLabel
@@ -334,13 +303,17 @@ import UIKit
             return
         }
 
-        let frameInView = view.convert(keyboardFrame, from: nil)
-        let keyboardVisible = frameInView.minY < view.bounds.maxY - 1
+        let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
+        let overlap = max(0, scrollView.frame.maxY - keyboardFrameInView.minY)
+        let keyboardVisible = overlap > 0
+
         let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
         let curveRaw = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
         let options = UIView.AnimationOptions(rawValue: curveRaw << 16)
 
         UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.scrollView.contentInset.bottom = overlap
+            self.scrollView.verticalScrollIndicatorInsets.bottom = overlap
             self.copyrightLabel.alpha = keyboardVisible ? 0 : 1
         }
     }
@@ -348,12 +321,31 @@ import UIKit
     @objc private func keyboardWillHide(_ notification: Notification) {
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
         UIView.animate(withDuration: duration) {
+            self.scrollView.contentInset.bottom = 0
+            self.scrollView.verticalScrollIndicatorInsets.bottom = 0
             self.copyrightLabel.alpha = 1
         }
     }
 
     @objc private func dismissKeyboard() {
         view.endEditing(true)
+    }
+
+    @objc private func textFieldEditingChanged() {
+        updateLoginButtonState()
+    }
+
+    private func hasCredentials() -> Bool {
+        let username = usernameTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let password = passwordTextField.text ?? ""
+        return !username.isEmpty && !password.isEmpty
+    }
+
+    private func updateLoginButtonState() {
+        // Keep the button disabled until both fields have content (unless logging in).
+        if loginTask == nil {
+            loginButton.isEnabled = hasCredentials()
+        }
     }
 
     @objc private func togglePasswordVisibility(_ sender: UIButton) {
@@ -480,14 +472,15 @@ import UIKit
     private func setLoading(_ loading: Bool) {
         usernameTextField.isEnabled = !loading
         passwordTextField.isEnabled = !loading
-        loginButton.isEnabled = !loading
 
         if loading {
+            loginButton.isEnabled = true
             loginButton.configuration?.showsActivityIndicator = true
             loginButton.configuration?.title = NSLocalizedString("Logging in…", comment: "")
         } else {
             loginButton.configuration?.showsActivityIndicator = false
             loginButton.configuration?.title = NSLocalizedString("Log in", comment: "")
+            updateLoginButtonState()
         }
     }
 

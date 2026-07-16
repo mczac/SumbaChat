@@ -1811,6 +1811,11 @@
 					};
 					1FA93D9B2D70FCC200DF6CDF = {
 						CreatedOnToolsVersion = 16.2;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 					1FD8AD892A3A162100787C16 = {
 						CreatedOnToolsVersion = 14.3;
@@ -1818,6 +1823,11 @@
 					};
 					1FF2FD5A2AB99CCB000C9905 = {
 						CreatedOnToolsVersion = 14.3.1;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 					2C05747C1EDD9E8E00D9E7F2 = {
 						CreatedOnToolsVersion = 8.3.2;
@@ -1831,7 +1841,7 @@
 								enabled = 1;
 							};
 							com.apple.Keychain = {
-								enabled = 0;
+								enabled = 1;
 							};
 							com.apple.Push = {
 								enabled = 1;
@@ -1842,11 +1852,21 @@
 						CreatedOnToolsVersion = 11.5;
 						LastSwiftMigration = 1220;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 					2CC0014E24A1F0E900A20167 = {
 						CreatedOnToolsVersion = 11.5;
 						LastSwiftMigration = 1220;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
