@@ -266,7 +266,7 @@ import Toast
 
         self.showSendMessageButton()
         self.leftButton.setImage(UIImage(systemName: "plus"), for: .normal)
-        self.leftButton.accessibilityLabel = NSLocalizedString("Share a file from your Nextcloud", comment: "")
+        self.leftButton.accessibilityLabel = String(format: NSLocalizedString("Share a file from %@", comment: ""), filesAppName)
         self.leftButton.accessibilityHint = NSLocalizedString("Double tap to open file browser", comment: "")
         self.leftButton.accessibilityIdentifier = "shareButton"
 

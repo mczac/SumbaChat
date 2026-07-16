@@ -22,7 +22,7 @@ typedef enum NCTextColorStyle {
 #pragma mark - App configuration
 
 NSString * const talkAppName = @"SumbaChat";
-NSString * const filesAppName = @"Nextcloud";
+NSString * const filesAppName = @"SumbaFiles";
 NSString * const copyright = @"© 2026 Sumba Chat";
 NSString * const licenseNotice = @"Based on Nextcloud Talk, licensed under GPLv3";
 NSString * const bundleIdentifier = @"com.spl.SumbaChat";
