@@ -191,6 +191,30 @@ import UniformTypeIdentifiers
     }
 }
 
+/// Cancels in-flight video exports when the user dismisses Send/prepare.
+/// Top-level so ObjC (Share Extension) can see a concrete class, not a nested forward decl.
+@objcMembers public final class MediaUploadPreparationToken: NSObject {
+    private let lock = NSLock()
+    private var exportSession: AVAssetExportSession?
+    public private(set) var isCancelled = false
+
+    @objc public func cancel() {
+        lock.lock()
+        defer { lock.unlock() }
+        isCancelled = true
+        exportSession?.cancelExport()
+    }
+
+    func attach(_ session: AVAssetExportSession) {
+        lock.lock()
+        defer { lock.unlock() }
+        exportSession = session
+        if isCancelled {
+            session.cancelExport()
+        }
+    }
+}
+
 /// Compresses photos and videos before they are uploaded.
 @objcMembers public class MediaUploadPreprocessor: NSObject {
 
@@ -262,29 +286,6 @@ import UniformTypeIdentifiers
         }
 
         return fileType.conforms(to: .movie)
-    }
-
-    /// Cancels in-flight video exports when the user dismisses Send/prepare.
-    @objcMembers public final class MediaUploadPreparationToken: NSObject {
-        private let lock = NSLock()
-        private var exportSession: AVAssetExportSession?
-        public private(set) var isCancelled = false
-
-        @objc public func cancel() {
-            lock.lock()
-            defer { lock.unlock() }
-            isCancelled = true
-            exportSession?.cancelExport()
-        }
-
-        fileprivate func attach(_ session: AVAssetExportSession) {
-            lock.lock()
-            defer { lock.unlock() }
-            exportSession = session
-            if isCancelled {
-                session.cancelExport()
-            }
-        }
     }
 
     @objc(compressVideoAtURL:toDestinationURL:settings:cancelToken:progress:completion:)

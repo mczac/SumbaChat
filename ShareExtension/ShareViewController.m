@@ -329,7 +329,7 @@
                 [items beginProviderLoad];
                 [itemProvider loadFileRepresentationForTypeIdentifier:(NSString *)kUTTypeMovie
                                                     completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
-                    NSString *videoName = url.lastPathComponent.length > 0 ? url.lastPathComponent : NSLocalizedString("Video", comment: "Generic name when a shared video failed to load");
+                    NSString *videoName = url.lastPathComponent.length > 0 ? url.lastPathComponent : NSLocalizedString(@"Video", @"Generic name when a shared video failed to load");
                     if (url != nil && [items addItemWithURL:url]) {
                         [NCLog log:[NSString stringWithFormat:@"Share: staged video via loadFileRepresentation %@", videoName]];
                         [items endProviderLoad];
@@ -366,7 +366,7 @@
 
                 [itemProvider loadFileRepresentationForTypeIdentifier:representationType
                                                     completionHandler:^(NSURL * _Nullable url, NSError * _Nullable error) {
-                    NSString *fileName = url.lastPathComponent.length > 0 ? url.lastPathComponent : NSLocalizedString("Shared file", comment: "Generic name when a shared attachment has no filename");
+                    NSString *fileName = url.lastPathComponent.length > 0 ? url.lastPathComponent : NSLocalizedString(@"Shared file", @"Generic name when a shared attachment has no filename");
                     if (url != nil && [items addItemWithURL:url]) {
                         [NCLog log:[NSString stringWithFormat:@"Share: staged via loadFileRepresentation(%@) %@", representationType, fileName]];
                         [items endProviderLoad];
@@ -406,7 +406,7 @@
                 [items beginProviderLoad];
                 [items addImageFromItemProvider:itemProvider completion:^(BOOL success) {
                     if (!success) {
-                        [items reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                        [items reportStagingFailureWithName:NSLocalizedString(@"Photo", @"Generic name when a shared photo failed to load")];
                     }
                     [items endProviderLoad];
                 }];
@@ -428,7 +428,7 @@
                                                   [items reportStagingFailureWithName:passFileName];
                                               }
                                           } else {
-                                              [items reportStagingFailureWithName:NSLocalizedString("Shared file", comment: "Generic name when a shared attachment has no filename")];
+                                              [items reportStagingFailureWithName:NSLocalizedString(@"Shared file", @"Generic name when a shared attachment has no filename")];
                                           }
                                           [items endProviderLoad];
                                       }];

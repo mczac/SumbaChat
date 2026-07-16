@@ -130,7 +130,7 @@
 
 - (void)reportStagingFailureWithName:(NSString *)fileName
 {
-    NSString *name = fileName.length > 0 ? fileName : NSLocalizedString("Shared file", comment: "Generic name when a shared attachment has no filename");
+    NSString *name = fileName.length > 0 ? fileName : NSLocalizedString(@"Shared file", @"Generic name when a shared attachment has no filename");
     void (^record)(void) = ^{
         [self.pendingStagingFailures addObject:name];
         [NCLog log:[NSString stringWithFormat:@"ShareItemController: staging failure recorded for %@", name]];
@@ -464,20 +464,20 @@
                         finish(YES);
                     } else {
                         [NCLog log:@"ShareItemController: image fallback NSData could not decode"];
-                        [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                        [loadSelf reportStagingFailureWithName:NSLocalizedString(@"Photo", @"Generic name when a shared photo failed to load")];
                         finish(NO);
                     }
                 } else if ([(NSObject *)item isKindOfClass:[NSURL class]]) {
                     [NCLog log:@"ShareItemController: image fallback trying loadItem URL"];
                     BOOL ok = [loadSelf addItemWithURL:(NSURL *)item];
                     if (!ok) {
-                        [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                        [loadSelf reportStagingFailureWithName:NSLocalizedString(@"Photo", @"Generic name when a shared photo failed to load")];
                     }
                     finish(ok);
                 } else {
                     [NCLog log:[NSString stringWithFormat:@"ShareItemController: all image fallbacks failed (%@)",
                                 loadError.localizedDescription ?: imageError.localizedDescription ?: @"unknown"]];
-                    [loadSelf reportStagingFailureWithName:NSLocalizedString("Photo", comment: "Generic name when a shared photo failed to load")];
+                    [loadSelf reportStagingFailureWithName:NSLocalizedString(@"Photo", @"Generic name when a shared photo failed to load")];
                     finish(NO);
                 }
             }];
