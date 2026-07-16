@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
-               BuildableName = "NextcloudTalk.app"
+               BuildableName = "SumbaChat.app"
                BlueprintName = "NextcloudTalk"
                ReferencedContainer = "container:NextcloudTalk.xcodeproj">
             </BuildableReference>
@@ -76,7 +76,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
-            BuildableName = "NextcloudTalk.app"
+            BuildableName = "SumbaChat.app"
             BlueprintName = "NextcloudTalk"
             ReferencedContainer = "container:NextcloudTalk.xcodeproj">
          </BuildableReference>
@@ -93,7 +93,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
-            BuildableName = "NextcloudTalk.app"
+            BuildableName = "SumbaChat.app"
             BlueprintName = "NextcloudTalk"
             ReferencedContainer = "container:NextcloudTalk.xcodeproj">
          </BuildableReference>
