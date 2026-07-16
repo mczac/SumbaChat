@@ -17,10 +17,15 @@ import UniformTypeIdentifiers
 }
 
 /// Explicit compression strength (Choose on upload, or resolved Automatic level).
+/// Raw values: none=0, low=1, medium=2, high=3 (Build 9; replaces moderate=1).
 @objc public enum MediaUploadCompressionLevel: Int {
     case none = 0
-    case moderate = 1
-    case high = 2
+    case low = 1
+    case medium = 2
+    case high = 3
+
+    /// Legacy name used before Build 9.
+    public static var moderate: MediaUploadCompressionLevel { .medium }
 }
 
 @objcMembers public final class MediaUploadCompressionSettings: NSObject {
@@ -28,14 +33,6 @@ import UniformTypeIdentifiers
     public static let defaultImageMaxDimension = 1280
     public static let defaultImageJPEGQuality = 45
     public static let defaultVideoPreset = "low"
-
-    public static let moderateImageMaxDimension = 1920
-    public static let moderateImageJPEGQuality = 80
-    public static let moderateVideoPreset = "720p"
-
-    public static let highImageMaxDimension = 1280
-    public static let highImageJPEGQuality = 45
-    public static let highVideoPreset = "low"
 
     public static let automaticMaxBytes: Int64 = 16 * 1024 * 1024
     public static let automaticCellularEscalateBytes: Int64 = 8 * 1024 * 1024
@@ -46,6 +43,7 @@ import UniformTypeIdentifiers
     public let imageJPEGQuality: CGFloat
     public let videoEnabled: Bool
     public let videoPreset: String
+    public let profile: MediaUploadProfileConfig?
 
     public override convenience init() {
         self.init(level: .high)
@@ -53,6 +51,7 @@ import UniformTypeIdentifiers
 
     @objc(initWithLevel:)
     public convenience init(level: MediaUploadCompressionLevel) {
+        let debug = MediaUploadDebugSettings.shared()
         switch level {
         case .none:
             self.init(enabled: false,
@@ -60,21 +59,17 @@ import UniformTypeIdentifiers
                       imageMaxDimension: Self.defaultImageMaxDimension,
                       imageJPEGQuality: 100,
                       videoEnabled: false,
-                      videoPreset: Self.defaultVideoPreset)
-        case .moderate:
+                      videoPreset: Self.defaultVideoPreset,
+                      profile: nil)
+        case .low, .medium, .high:
+            let profile = debug.profile(for: level) ?? .defaultMedium
             self.init(enabled: true,
                       imageEnabled: true,
-                      imageMaxDimension: Self.moderateImageMaxDimension,
-                      imageJPEGQuality: Self.moderateImageJPEGQuality,
+                      imageMaxDimension: profile.imageMaxDimension,
+                      imageJPEGQuality: profile.imageJPEGQuality,
                       videoEnabled: true,
-                      videoPreset: Self.moderateVideoPreset)
-        case .high:
-            self.init(enabled: true,
-                      imageEnabled: true,
-                      imageMaxDimension: Self.highImageMaxDimension,
-                      imageJPEGQuality: Self.highImageJPEGQuality,
-                      videoEnabled: true,
-                      videoPreset: Self.highVideoPreset)
+                      videoPreset: profile.exportPreset,
+                      profile: profile)
         }
     }
 
@@ -90,13 +85,15 @@ import UniformTypeIdentifiers
                 imageMaxDimension: Int,
                 imageJPEGQuality: Int,
                 videoEnabled: Bool,
-                videoPreset: String) {
+                videoPreset: String,
+                profile: MediaUploadProfileConfig? = nil) {
         self.enabled = enabled
         self.imageEnabled = imageEnabled
         self.imageMaxDimension = CGFloat(Self.validImageMaxDimension(imageMaxDimension))
         self.imageJPEGQuality = CGFloat(Self.validImageJPEGQuality(imageJPEGQuality)) / 100
         self.videoEnabled = videoEnabled
         self.videoPreset = Self.validVideoPreset(videoPreset)
+        self.profile = profile
     }
 
     public var shouldCompressImages: Bool {
@@ -115,6 +112,8 @@ import UniformTypeIdentifiers
             return AVAssetExportPresetHighestQuality
         case "480p":
             return AVAssetExportPreset640x480
+        case "540p":
+            return AVAssetExportPreset960x540
         case "720p":
             return AVAssetExportPreset1280x720
         case "1080p":
@@ -134,19 +133,19 @@ import UniformTypeIdentifiers
     }
 
     private static func validImageJPEGQuality(_ value: Int) -> Int {
-        guard (10...100).contains(value) else {
+        guard (1...100).contains(value) else {
             return defaultImageJPEGQuality
         }
         return value
     }
 
     private static func validVideoPreset(_ value: String) -> String {
-        let supportedPresets = ["low", "medium", "high", "480p", "720p", "1080p", "2160p"]
+        let supportedPresets = ["low", "medium", "high", "480p", "540p", "720p", "1080p", "2160p"]
         return supportedPresets.contains(value) ? value : defaultVideoPreset
     }
 }
 
-/// Resolves Automatic compression to Moderate or High. Always compresses (never None).
+/// Package-aware Automatic picker: per-file cap X, package cap Y (Y wins).
 @objcMembers public final class MediaUploadAutomaticPolicy: NSObject {
 
     private static let pathMonitor = NWPathMonitor()
@@ -163,39 +162,101 @@ import UniformTypeIdentifiers
         pathMonitor.start(queue: monitorQueue)
     }
 
+    /// Legacy single-file API — prefers Low/Medium/High from package logic for one URL.
     @objc(compressionLevelForFileURL:)
     public static func compressionLevel(forFileURL fileURL: URL) -> MediaUploadCompressionLevel {
-        startMonitoringIfNeeded()
+        let levels = compressionLevels(forFileURLs: [fileURL])
+        return levels.first ?? .medium
+    }
 
-        // Use on-disk size only. A full JPEG simulate-encode here used to run on the main
-        // thread during Send (Automatic), which can jetsam the app on large HEIC/photos —
-        // especially noticeable on iOS 18 / lower-RAM devices. Escalation thresholds still
-        // work well against original bytes.
-        let originalBytes = MediaUploadPreprocessor.fileSize(at: fileURL)
+    /// Mildest per-item levels such that estimates ≤ X and sum ≤ Y; escalate largest first; High is best effort.
+    public static func compressionLevels(forFileURLs fileURLs: [URL]) -> [MediaUploadCompressionLevel] {
+        startMonitoringIfNeeded()
+        let debug = MediaUploadDebugSettings.shared()
+        let perFileCap = max(Int64(1024), debug.perFileMaxBytes)
+        let packageCap = max(perFileCap, debug.packageMaxBytes)
+
+        var levels: [MediaUploadCompressionLevel] = fileURLs.map { url in
+            let ext = url.pathExtension.lowercased()
+            let isMedia = NCUtils.isImage(fileExtension: ext) || MediaUploadPreprocessor.isVideo(fileExtension: ext)
+            return isMedia ? .low : .none
+        }
+
+        func estimate(at index: Int) -> Int64 {
+            let url = fileURLs[index]
+            let level = levels[index]
+            if level == .none {
+                return MediaUploadPreprocessor.fileSizePublic(at: url)
+            }
+            return MediaUploadPreprocessor.estimatedByteCount(at: url, level: level)
+        }
+
+        func escalate(_ index: Int) -> Bool {
+            switch levels[index] {
+            case .low:
+                levels[index] = .medium
+                return true
+            case .medium:
+                levels[index] = .high
+                return true
+            default:
+                return false
+            }
+        }
+
+        // Per-file cap X.
+        var changed = true
+        while changed {
+            changed = false
+            for i in fileURLs.indices where levels[i] != .none {
+                if estimate(at: i) > perFileCap, escalate(i) {
+                    changed = true
+                }
+            }
+        }
+
+        // Package cap Y wins — escalate largest compressible items.
+        while true {
+            let estimates = fileURLs.indices.map { estimate(at: $0) }
+            let total = estimates.reduce(Int64(0), +)
+            if total <= packageCap { break }
+
+            var bestIndex: Int?
+            var bestSize: Int64 = -1
+            for i in fileURLs.indices where levels[i] != .none && levels[i] != .high {
+                if estimates[i] > bestSize {
+                    bestSize = estimates[i]
+                    bestIndex = i
+                }
+            }
+            guard let index = bestIndex, escalate(index) else { break }
+        }
+
+        // Cellular nudge: if still on Low for a large item, prefer Medium.
         let path = latestPath
         let isConstrainedCellular = path?.isExpensive == true || path?.isConstrained == true
             || path?.usesInterfaceType(.cellular) == true
-
-        if originalBytes > MediaUploadCompressionSettings.automaticMaxBytes {
-            NCLog.log("MediaUploadAutomaticPolicy: \(fileURL.lastPathComponent) → High (\(originalBytes) bytes > 16 MB)")
-            return .high
+        if isConstrainedCellular {
+            for i in fileURLs.indices where levels[i] == .low {
+                let original = MediaUploadPreprocessor.fileSizePublic(at: fileURLs[i])
+                if original > MediaUploadCompressionSettings.automaticCellularEscalateBytes {
+                    levels[i] = .medium
+                }
+            }
         }
 
-        if isConstrainedCellular && originalBytes > MediaUploadCompressionSettings.automaticCellularEscalateBytes {
-            NCLog.log("MediaUploadAutomaticPolicy: \(fileURL.lastPathComponent) → High (cellular, \(originalBytes) bytes)")
-            return .high
+        for (url, level) in zip(fileURLs, levels) {
+            NCLog.log("MediaUploadAutomaticPolicy: \(url.lastPathComponent) → \(level.rawValue) (X=\(perFileCap) Y=\(packageCap))")
         }
-
-        NCLog.log("MediaUploadAutomaticPolicy: \(fileURL.lastPathComponent) → Moderate (\(originalBytes) bytes)")
-        return .moderate
+        return levels
     }
 }
 
-/// Cancels in-flight video exports when the user dismisses Send/prepare.
-/// Top-level so ObjC (Share Extension) can see a concrete class, not a nested forward decl.
+/// Cancels in-flight video exports / writer sessions when the user dismisses Send/prepare.
 @objcMembers public final class MediaUploadPreparationToken: NSObject {
     private let lock = NSLock()
     private var exportSession: AVAssetExportSession?
+    private var writerCancel: (() -> Void)?
     public private(set) var isCancelled = false
 
     @objc public func cancel() {
@@ -203,6 +264,7 @@ import UniformTypeIdentifiers
         defer { lock.unlock() }
         isCancelled = true
         exportSession?.cancelExport()
+        writerCancel?()
     }
 
     func attach(_ session: AVAssetExportSession) {
@@ -211,6 +273,15 @@ import UniformTypeIdentifiers
         exportSession = session
         if isCancelled {
             session.cancelExport()
+        }
+    }
+
+    func attachWriterCancel(_ block: @escaping () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        writerCancel = block
+        if isCancelled {
+            block()
         }
     }
 }
@@ -228,8 +299,6 @@ import UniformTypeIdentifiers
             return false
         }
 
-        // Downsample via ImageIO to the target max dimension — never decode full-resolution
-        // HEIC/JPEG into memory (UIImage(contentsOfFile:) jetsams on large camera photos).
         guard let image = previewImage(at: sourceURL, maxDimension: settings.imageMaxDimension)
                 ?? UIImage(contentsOfFile: sourceURL.path) else {
             NCLog.log("MediaUploadPreprocessor: failed to decode image for compression at \(sourceURL.lastPathComponent)")
@@ -241,7 +310,6 @@ import UniformTypeIdentifiers
             return false
         }
 
-        // Never delete the source if destination is the same path.
         let sourcePath = sourceURL.standardizedFileURL.path
         let destinationPath = destinationURL.standardizedFileURL.path
         let destinationIsSource = sourcePath == destinationPath
@@ -300,12 +368,52 @@ import UniformTypeIdentifiers
             return
         }
 
-        let asset = AVURLAsset(url: sourceURL)
-
         guard settings.shouldCompressVideos else {
             completion(false)
             return
         }
+
+        let debug = MediaUploadDebugSettings.shared()
+        if debug.usesAssetWriter, let profile = settings.profile {
+            MediaUploadVideoWriter.compress(at: sourceURL,
+                                            toDestinationURL: destinationURL,
+                                            profile: profile,
+                                            cancelToken: cancelToken,
+                                            progress: progress) { success in
+                if success {
+                    completion(true)
+                    return
+                }
+                if cancelToken?.isCancelled == true {
+                    completion(false)
+                    return
+                }
+                NCLog.log("MediaUploadPreprocessor: Writer failed — falling back to ExportSession")
+                compressVideoWithExportSession(at: sourceURL,
+                                               toDestinationURL: destinationURL,
+                                               settings: settings,
+                                               cancelToken: cancelToken,
+                                               progress: progress,
+                                               completion: completion)
+            }
+            return
+        }
+
+        compressVideoWithExportSession(at: sourceURL,
+                                       toDestinationURL: destinationURL,
+                                       settings: settings,
+                                       cancelToken: cancelToken,
+                                       progress: progress,
+                                       completion: completion)
+    }
+
+    private static func compressVideoWithExportSession(at sourceURL: URL,
+                                                       toDestinationURL destinationURL: URL,
+                                                       settings: MediaUploadCompressionSettings,
+                                                       cancelToken: MediaUploadPreparationToken?,
+                                                       progress: ((Float) -> Void)?,
+                                                       completion: @escaping (Bool) -> Void) {
+        let asset = AVURLAsset(url: sourceURL)
 
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: settings.avVideoPreset) else {
             NCLog.log("MediaUploadPreprocessor: unable to create export session")
@@ -373,12 +481,14 @@ import UniformTypeIdentifiers
 
     @objc(estimatedByteCountAtURL:level:)
     public static func estimatedByteCount(at fileURL: URL, level: MediaUploadCompressionLevel) -> Int64 {
-        let counts = estimatedByteCounts(at: fileURL, treatAsImage: nil)
+        let counts = cheapEstimatedByteCounts(at: fileURL)
         switch level {
         case .none:
             return counts.none
-        case .moderate:
-            return counts.moderate
+        case .low:
+            return counts.low
+        case .medium:
+            return counts.medium
         case .high:
             return counts.high
         @unknown default:
@@ -386,123 +496,94 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Per-level size estimates for one file. Image levels share one decode so chips stay consistent and ordered.
-    public static func estimatedByteCounts(at fileURL: URL, treatAsImage: Bool? = nil) -> (none: Int64, moderate: Int64, high: Int64) {
+    public struct LevelEstimates {
+        public var none: Int64
+        public var low: Int64
+        public var medium: Int64
+        public var high: Int64
+    }
+
+    /// Share Extension–safe chip labels.
+    public static func cheapEstimatedByteCounts(at fileURL: URL, treatAsImage: Bool? = nil) -> LevelEstimates {
         let extensionName = fileURL.pathExtension.lowercased()
         let originalSize = fileSize(at: fileURL)
         let none = originalSize
+        let debug = MediaUploadDebugSettings.shared()
 
         let looksLikeImage = treatAsImage ?? NCUtils.isImage(fileExtension: extensionName)
         if looksLikeImage {
             if extensionName == "gif" {
-                return (none, none, none)
+                return LevelEstimates(none: none, low: none, medium: none, high: none)
             }
-            return estimatedImageByteCounts(at: fileURL, originalSize: originalSize)
+            let low = min(heuristicCompressedByteCount(originalSize: originalSize, level: .low), none)
+            let medium = min(heuristicCompressedByteCount(originalSize: originalSize, level: .medium), low)
+            let high = min(heuristicCompressedByteCount(originalSize: originalSize, level: .high), medium)
+            return LevelEstimates(none: none, low: low, medium: medium, high: high)
         }
 
         if isVideo(fileExtension: extensionName) {
-            let moderate = estimatedVideoByteCount(at: fileURL, level: .moderate, originalSize: originalSize)
-            let high = estimatedVideoByteCount(at: fileURL, level: .high, originalSize: originalSize)
-            return (none, moderate, min(high, moderate))
-        }
-
-        return (none, none, none)
-    }
-
-    /// Share Extension–safe chip labels: no JPEG simulate-encode (jetsam).
-    /// Images use % heuristics; videos use duration × preset bitrate; audio/files passthrough.
-    public static func cheapEstimatedByteCounts(at fileURL: URL, treatAsImage: Bool? = nil) -> (none: Int64, moderate: Int64, high: Int64) {
-        let extensionName = fileURL.pathExtension.lowercased()
-        let originalSize = fileSize(at: fileURL)
-        let none = originalSize
-
-        let looksLikeImage = treatAsImage ?? NCUtils.isImage(fileExtension: extensionName)
-        if looksLikeImage {
-            if extensionName == "gif" {
-                return (none, none, none)
+            let duration = videoDurationSeconds(at: fileURL)
+            let lowP = debug.low
+            let medP = debug.medium
+            let highP = debug.high
+            let low: Int64
+            let medium: Int64
+            let high: Int64
+            if let duration, duration > 0 {
+                low = MediaUploadDebugSettings.estimatedVideoBytes(profile: lowP, durationSeconds: duration, originalSize: originalSize)
+                medium = MediaUploadDebugSettings.estimatedVideoBytes(profile: medP, durationSeconds: duration, originalSize: originalSize)
+                high = MediaUploadDebugSettings.estimatedVideoBytes(profile: highP, durationSeconds: duration, originalSize: originalSize)
+            } else {
+                low = heuristicCompressedByteCount(originalSize: originalSize, level: .low)
+                medium = heuristicCompressedByteCount(originalSize: originalSize, level: .medium)
+                high = heuristicCompressedByteCount(originalSize: originalSize, level: .high)
             }
-            let moderate = min(heuristicCompressedByteCount(originalSize: originalSize, level: .moderate), none)
-            let high = min(heuristicCompressedByteCount(originalSize: originalSize, level: .high), moderate)
-            return (none, moderate, high)
+            return LevelEstimates(none: none,
+                                  low: min(low, none),
+                                  medium: min(medium, min(low, none)),
+                                  high: min(high, min(medium, min(low, none))))
         }
 
-        if isVideo(fileExtension: extensionName) {
-            let moderate = estimatedVideoByteCount(at: fileURL, level: .moderate, originalSize: originalSize)
-            let high = estimatedVideoByteCount(at: fileURL, level: .high, originalSize: originalSize)
-            return (none, moderate, min(high, moderate))
-        }
-
-        // Audio and other attachments are not recompressed on Send.
-        return (none, none, none)
+        return LevelEstimates(none: none, low: none, medium: none, high: none)
     }
 
-    /// Sum of `cheapEstimatedByteCounts` for a mixed bag (photos + videos + files).
-    public static func cheapEstimatedByteCounts(forFileURLs fileURLs: [URL]) -> (none: Int64, moderate: Int64, high: Int64) {
+    public static func cheapEstimatedByteCounts(forFileURLs fileURLs: [URL]) -> LevelEstimates {
         var none: Int64 = 0
-        var moderate: Int64 = 0
+        var low: Int64 = 0
+        var medium: Int64 = 0
         var high: Int64 = 0
         for url in fileURLs {
             let counts = cheapEstimatedByteCounts(at: url)
             none += counts.none
-            moderate += counts.moderate
+            low += counts.low
+            medium += counts.medium
             high += counts.high
         }
-        // Keep the quality ladder readable even if one item's estimate is noisy.
-        high = min(high, moderate)
-        moderate = min(moderate, none)
-        high = min(high, moderate)
-        return (none, moderate, high)
+        high = min(high, medium)
+        medium = min(medium, low)
+        low = min(low, none)
+        high = min(high, medium)
+        medium = min(medium, low)
+        return LevelEstimates(none: none, low: low, medium: medium, high: high)
     }
 
-    private static func estimatedImageByteCounts(at fileURL: URL, originalSize: Int64) -> (none: Int64, moderate: Int64, high: Int64) {
-        let none = originalSize
-
-        // Decode once at the largest target; each level then resizes/encodes with its own preset.
-        let sourceImage = previewImage(at: fileURL, maxDimension: CGFloat(MediaUploadCompressionSettings.moderateImageMaxDimension))
-            ?? UIImage(contentsOfFile: fileURL.path)
-
-        guard let sourceImage else {
-            return (
-                none,
-                heuristicCompressedByteCount(originalSize: originalSize, level: .moderate),
-                heuristicCompressedByteCount(originalSize: originalSize, level: .high)
-            )
-        }
-
-        let moderateSettings = MediaUploadCompressionSettings(level: .moderate)
-        let highSettings = MediaUploadCompressionSettings(level: .high)
-
-        let moderateEncoded = compressedJPEGData(from: sourceImage, settings: moderateSettings).map { Int64($0.count) }
-        let highEncoded = compressedJPEGData(from: sourceImage, settings: highSettings).map { Int64($0.count) }
-
-        let moderate = min(
-            moderateEncoded ?? heuristicCompressedByteCount(originalSize: originalSize, level: .moderate),
-            none
-        )
-        // High must stay ≤ Moderate so the three chips read as a clear quality ladder.
-        let high = min(
-            highEncoded ?? heuristicCompressedByteCount(originalSize: originalSize, level: .high),
-            moderate
-        )
-
-        return (none, moderate, high)
-    }
-
-    /// Last-resort differentiated sizes when decode/encode fails (keeps chips from looking identical).
     private static func heuristicCompressedByteCount(originalSize: Int64, level: MediaUploadCompressionLevel) -> Int64 {
         guard originalSize > 0 else { return 0 }
+        let debug = MediaUploadDebugSettings.shared()
         let factor: Double
         switch level {
         case .none:
             return originalSize
-        case .moderate:
-            factor = 0.62
+        case .low:
+            factor = Double(debug.low.imageJPEGQuality) / 100.0 * 0.85
+        case .medium:
+            factor = Double(debug.medium.imageJPEGQuality) / 100.0 * 0.75
         case .high:
-            factor = 0.22
+            factor = Double(debug.high.imageJPEGQuality) / 100.0 * 0.65
         @unknown default:
             return originalSize
         }
-        return max(12_288, Int64(Double(originalSize) * factor))
+        return max(12_288, Int64(Double(originalSize) * min(0.95, max(0.05, factor))))
     }
 
     @objc(formattedByteCount:)
@@ -514,7 +595,6 @@ import UniformTypeIdentifiers
         return formatter.string(fromByteCount: byteCount)
     }
 
-    /// Loads a downsampled image suitable for preview/crop without decoding the full original into memory.
     @objc(previewImageAtURL:maxDimension:)
     public static func previewImage(at fileURL: URL, maxDimension: CGFloat) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
@@ -536,9 +616,8 @@ import UniformTypeIdentifiers
         return UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
     }
 
-    private static func estimatedVideoByteCount(at fileURL: URL, level: MediaUploadCompressionLevel, originalSize: Int64) -> Int64 {
+    private static func videoDurationSeconds(at fileURL: URL) -> Double? {
         let asset = AVURLAsset(url: fileURL)
-        // Local staged copies usually already have duration; briefly wait if not yet loaded.
         if asset.statusOfValue(forKey: "duration", error: nil) != .loaded {
             let group = DispatchGroup()
             group.enter()
@@ -547,29 +626,9 @@ import UniformTypeIdentifiers
             }
             _ = group.wait(timeout: .now() + 0.4)
         }
-
         let duration = CMTimeGetSeconds(asset.duration)
-        guard duration.isFinite, duration > 0 else {
-            // Fall back to aggressive % so chips don't show near-original for High on movies.
-            return heuristicCompressedByteCount(originalSize: originalSize, level: level == .none ? .none : level)
-        }
-
-        // Approximate average video bitrates for export presets (bits/sec), plus AAC audio.
-        // Tuned toward typical AVAssetExportSession output (High/low is often well under 1 Mbps).
-        let videoBitsPerSecond: Double
-        switch level {
-        case .none:
-            return originalSize
-        case .moderate:
-            videoBitsPerSecond = 2_500_000 // ~720p
-        case .high:
-            videoBitsPerSecond = 600_000 // ~low preset
-        @unknown default:
-            return originalSize
-        }
-        let audioBitsPerSecond = 128_000.0
-        let estimated = Int64((videoBitsPerSecond + audioBitsPerSecond) * duration / 8.0)
-        return max(12_288, min(estimated, originalSize))
+        guard duration.isFinite, duration > 0 else { return nil }
+        return duration
     }
 
     private static func pixelSize(of image: UIImage) -> CGSize {
@@ -593,5 +652,11 @@ import UniformTypeIdentifiers
     fileprivate static func fileSize(at url: URL) -> Int64 {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Public for Writer / Automatic policy.
+    @objc(fileSizePublicAtURL:)
+    public static func fileSizePublic(at url: URL) -> Int64 {
+        fileSize(at: url)
     }
 }

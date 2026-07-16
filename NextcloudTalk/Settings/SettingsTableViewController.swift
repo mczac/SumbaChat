@@ -17,6 +17,7 @@ enum SettingsSection: Int {
     case kSettingsSectionAccountSettings
     case kSettingsSectionOtherAccounts
     case kSettingsSectionConfiguration
+    case kSettingsSectionDebug
     case kSettingsSectionAdvanced
     case kSettingsSectionAbout
 }
@@ -144,6 +145,9 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
         // Compression section
         sections.append(SettingsSection.kSettingsSectionConfiguration.rawValue)
+
+        // Debug compression controls (Build 9 — visible in TestFlight)
+        sections.append(SettingsSection.kSettingsSectionDebug.rawValue)
 
         // Advanced section
         sections.append(SettingsSection.kSettingsSectionAdvanced.rawValue)
@@ -636,6 +640,8 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
             return getAccountSettingsSectionOptions().count
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
             return getConfigurationSectionOptions().count
+        case SettingsSection.kSettingsSectionDebug.rawValue:
+            return 1
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             return getAdvancedSectionOptions().count
         case SettingsSection.kSettingsSectionAbout.rawValue:
@@ -657,6 +663,8 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
             return NSLocalizedString("Other Accounts", comment: "")
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
             return NSLocalizedString("Compression", comment: "")
+        case SettingsSection.kSettingsSectionDebug.rawValue:
+            return NSLocalizedString("Debug", comment: "")
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             return NSLocalizedString("Advanced", comment: "")
         case SettingsSection.kSettingsSectionAbout.rawValue:
@@ -740,6 +748,14 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
             return sectionConfigurationCell(for: indexPath)
+
+        case SettingsSection.kSettingsSectionDebug.rawValue:
+            let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: "DebugCompressionCell", style: .subtitle)
+            cell.textLabel?.text = NSLocalizedString("Compression Debug", comment: "")
+            cell.detailTextLabel?.text = NSLocalizedString("Engine, caps, Low/Medium/High", comment: "")
+            cell.accessoryType = .disclosureIndicator
+            cell.setSettingsImage(image: UIImage(systemName: "wrench.and.screwdriver", withConfiguration: iconConfiguration))
+            return cell
 
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             return advancedCell(for: indexPath)
@@ -834,6 +850,10 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
             self.didSelectSettingsSectionCell(for: indexPath)
+
+        case SettingsSection.kSettingsSectionDebug.rawValue:
+            let debugVC = MediaUploadCompressionDebugViewController()
+            self.navigationController?.pushViewController(debugVC, animated: true)
 
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             self.didSelectAdvancedSectionCell(for: indexPath)

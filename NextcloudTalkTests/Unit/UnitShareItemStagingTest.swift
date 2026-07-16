@@ -150,10 +150,10 @@ final class UnitShareItemStagingTest: XCTestCase {
         let sizeB = try FileManager.default.attributesOfItem(atPath: b.path)[.size] as! NSNumber
         let original = sizeA.int64Value + sizeB.int64Value
         XCTAssertEqual(totals.none, original)
-        XCTAssertLessThan(totals.high, totals.moderate)
-        XCTAssertLessThanOrEqual(totals.moderate, totals.none)
-        // High should be well below a naive “22% of bag” only when… still ~22% for images; just ensure ladder.
-        XCTAssertGreaterThan(totals.moderate, 0)
+        XCTAssertLessThan(totals.high, totals.medium)
+        XCTAssertLessThanOrEqual(totals.medium, totals.low)
+        XCTAssertLessThanOrEqual(totals.low, totals.none)
+        XCTAssertGreaterThan(totals.medium, 0)
     }
 
     func testCheapPassthroughForNonMedia() throws {
@@ -161,7 +161,8 @@ final class UnitShareItemStagingTest: XCTestCase {
         try Data(repeating: 0x41, count: 50_000).write(to: pdf)
         let counts = MediaUploadPreprocessor.cheapEstimatedByteCounts(at: pdf)
         XCTAssertEqual(counts.none, 50_000)
-        XCTAssertEqual(counts.moderate, 50_000)
+        XCTAssertEqual(counts.low, 50_000)
+        XCTAssertEqual(counts.medium, 50_000)
         XCTAssertEqual(counts.high, 50_000)
     }
 
@@ -172,8 +173,26 @@ final class UnitShareItemStagingTest: XCTestCase {
         let totals = MediaUploadPreprocessor.cheapEstimatedByteCounts(forFileURLs: [image, other])
         let imageCounts = MediaUploadPreprocessor.cheapEstimatedByteCounts(at: image)
         XCTAssertEqual(totals.none, imageCounts.none + 5)
-        XCTAssertEqual(totals.moderate, imageCounts.moderate + 5)
+        XCTAssertEqual(totals.medium, imageCounts.medium + 5)
         XCTAssertEqual(totals.high, imageCounts.high + 5)
+    }
+
+    func testAutomaticPackageCapEscalates() throws {
+        let debug = MediaUploadDebugSettings.default
+        debug.perFileMaxBytes = 100 * 1024 * 1024
+        debug.packageMaxBytes = 1
+        debug.low.imageJPEGQuality = 90
+        debug.medium.imageJPEGQuality = 50
+        debug.high.imageJPEGQuality = 10
+        debug.save()
+        defer { MediaUploadDebugSettings.resetToDefaults() }
+
+        let a = try writeJPEG(named: "auto-a.jpg", size: CGSize(width: 320, height: 320))
+        let b = try writeJPEG(named: "auto-b.jpg", size: CGSize(width: 320, height: 320))
+        let levels = MediaUploadAutomaticPolicy.compressionLevels(forFileURLs: [a, b])
+        XCTAssertEqual(levels.count, 2)
+        // Tiny package cap forces escalation to High for both media items.
+        XCTAssertEqual(levels, [.high, .high])
     }
 
     // MARK: - Cancel prepare (Send-path)
@@ -195,13 +214,21 @@ final class UnitShareItemStagingTest: XCTestCase {
         XCTAssertFalse(didCompress, "None must not rewrite to destination")
     }
 
-    func testCompressModerateWritesNonEmptyJPEG() throws {
+    func testCompressMediumWritesNonEmptyJPEG() throws {
         let source = try writeJPEG(named: "big.jpg", size: CGSize(width: 400, height: 300))
-        let dest = scratchDir.appendingPathComponent("moderate.jpg")
-        let settings = MediaUploadCompressionSettings(level: .moderate)
+        let dest = scratchDir.appendingPathComponent("medium.jpg")
+        let settings = MediaUploadCompressionSettings(level: .medium)
         let didCompress = MediaUploadPreprocessor.compressImage(at: source, toDestinationURL: dest, settings: settings)
         XCTAssertTrue(didCompress)
         let size = try FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? NSNumber
         XCTAssertGreaterThan(size?.int64Value ?? 0, 0)
+    }
+
+    func testEffectiveRateRespectsMaxBytesCap() {
+        let profile = MediaUploadProfileConfig.defaultHigh
+        // 200s at 0.12 MB/s would be 24 MB; cap is 12 MB → rate ≤ 0.06
+        let rate = MediaUploadDebugSettings.effectiveRateMBps(profile: profile, durationSeconds: 200)
+        XCTAssertLessThanOrEqual(rate, 0.12)
+        XCTAssertEqual(rate, 12.0 / 200.0, accuracy: 0.001)
     }
 }

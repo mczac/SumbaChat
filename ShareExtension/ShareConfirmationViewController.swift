@@ -56,7 +56,7 @@ import MBProgressHUD
     private var uploadFailed = false
     private var uploadErrors: [String] = []
     private var uploadSuccess: [ShareItem] = []
-    private var chosenCompressionLevel: MediaUploadCompressionLevel = .moderate
+    private var chosenCompressionLevel: MediaUploadCompressionLevel = .medium
     private var isPreparingForUpload = false
     /// True from Send until upload finishes/fails — blocks double-Send (seen on iOS 18 Manual).
     private var isUploadingMedia = false
@@ -206,12 +206,12 @@ import MBProgressHUD
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        for level in [MediaUploadCompressionLevel.none, .moderate, .high] {
+        for level in [MediaUploadCompressionLevel.none, .low, .medium, .high] {
             let button = UIButton(type: .system)
             button.tag = level.rawValue
             button.titleLabel?.numberOfLines = 2
             button.titleLabel?.textAlignment = .center
-            button.titleLabel?.font = .preferredFont(forTextStyle: .caption1)
+            button.titleLabel?.font = .preferredFont(forTextStyle: .caption2)
             button.layer.cornerRadius = 10
             button.layer.borderWidth = 1
             button.addTarget(self, action: #selector(compressionOptionPressed(_:)), for: .touchUpInside)
@@ -632,6 +632,15 @@ import MBProgressHUD
         NCLog.log("Media upload: preparing \(mediaCount) item(s) for compression")
 
         let chosenLevel = self.chosenCompressionLevel
+        let autoURLs = self.shareItemController.shareItems.compactMap(\.fileURL)
+        let autoLevels = mode == .automatic
+            ? MediaUploadAutomaticPolicy.compressionLevels(forFileURLs: autoURLs)
+            : []
+        var autoLevelByPath: [String: MediaUploadCompressionLevel] = [:]
+        for (url, level) in zip(autoURLs, autoLevels) {
+            autoLevelByPath[url.path] = level
+        }
+
         self.shareItemController.prepareItemsForUpload(levelProvider: { item in
             switch mode {
             case .noCompression:
@@ -640,16 +649,16 @@ import MBProgressHUD
                 return chosenLevel.rawValue
             case .automatic:
                 guard let fileURL = item.fileURL else {
-                    return MediaUploadCompressionLevel.moderate.rawValue
+                    return MediaUploadCompressionLevel.medium.rawValue
                 }
                 let extensionName = fileURL.pathExtension.lowercased()
                 let isMedia = item.isImage || MediaUploadPreprocessor.isVideo(fileExtension: extensionName)
                 if !isMedia {
                     return MediaUploadCompressionLevel.none.rawValue
                 }
-                return MediaUploadAutomaticPolicy.compressionLevel(forFileURL: fileURL).rawValue
+                return (autoLevelByPath[fileURL.path] ?? .medium).rawValue
             @unknown default:
-                return MediaUploadCompressionLevel.moderate.rawValue
+                return MediaUploadCompressionLevel.medium.rawValue
             }
         }, progress: { [weak self] fraction in
             guard let self, !self.mediaFlowCancelled else { return }
@@ -679,8 +688,10 @@ import MBProgressHUD
         switch level {
         case .none:
             return NSLocalizedString("None", comment: "No media compression")
-        case .moderate:
-            return NSLocalizedString("Moderate", comment: "Moderate media compression")
+        case .low:
+            return NSLocalizedString("Low", comment: "Low media compression")
+        case .medium:
+            return NSLocalizedString("Medium", comment: "Medium media compression")
         case .high:
             return NSLocalizedString("High", comment: "High media compression")
         @unknown default:
@@ -709,24 +720,24 @@ import MBProgressHUD
             && loadingDone
 
         self.compressionSectionView.isHidden = !showQuality
-        self.compressionSectionHeightConstraint?.constant = showQuality ? 82 : 0
+        self.compressionSectionHeightConstraint?.constant = showQuality ? 88 : 0
 
         guard showQuality else {
             self.view.layoutIfNeeded()
             return
         }
 
-        // Per-item cheap estimates (video: duration×bitrate; image: % heuristic; audio/files: passthrough),
-        // then summed. Avoids JPEG simulate-encode (Share Extension jetsam) and flat % on the whole bag.
+        // Per-item cheap estimates from Debug rates (video: rate×duration; image: quality heuristic).
         let items = self.shareItemController.shareItems
         let urls = items.compactMap(\.fileURL)
         let totals = MediaUploadPreprocessor.cheapEstimatedByteCounts(forFileURLs: urls)
         let estimates: [MediaUploadCompressionLevel: Int64] = [
             .none: totals.none,
-            .moderate: totals.moderate,
+            .low: totals.low,
+            .medium: totals.medium,
             .high: totals.high
         ]
-        NCLog.log("Media upload: Choose-on-upload chips for \(items.count) item(s) — none=\(totals.none) moderate=\(totals.moderate) high=\(totals.high)")
+        NCLog.log("Media upload: Choose-on-upload chips for \(items.count) item(s) — none=\(totals.none) low=\(totals.low) medium=\(totals.medium) high=\(totals.high)")
         self.applyCompressionChipTitles(estimates: estimates)
         self.view.layoutIfNeeded()
     }

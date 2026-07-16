@@ -107,3 +107,16 @@ Unchanged (GIF skipped; pasted PNG data path unchanged).
 - **Manual chip sizes:** per-item cheap estimates summed for mixed bags —
   images: % heuristic; videos: duration × bitrate; audio/files: passthrough.
   No JPEG simulate-encode in the Share Extension.
+
+## Build 9 — AVAssetWriter + Debug controls
+
+- **Branch:** `feature/media-upload-writer-debug` (revert baseline: git tag `build-8`).
+- **Settings → Debug → Compression Debug:** video engine (Writer vs ExportSession),
+  per-file cap X, package cap Y, Low/Medium/High (JPEG quality, edges, MB/s,
+  max MB, FPS, ExportSession preset). Mirrored via App Group.
+- **Manual chips:** None / Low / Medium / High.
+- **Automatic:** package-aware — escalate largest items until estimates ≤ X and
+  sum ≤ Y (Y wins); High is best effort for huge clips.
+- **Video:** default `AVAssetWriter` (bitrate + size + fps); falls back to
+  `AVAssetExportSession` on failure. Preset mode uses Apple size/quality presets
+  (`640x480`, `960x540`, `1280x720`, … — not fictional 1024×576 / 854×480).
