@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
+import AVFoundation
 import WebRTC
 
 internal protocol NCCallControllerDelegate: NSObjectProtocol {
@@ -199,17 +200,40 @@ internal class NCCallController: NSObject, NCPeerConnectionDelegate, NCSignaling
 
         // Make sure the signaling controller has retrieved the settings before joining a call
         self.signalingController.updateSignalingSettings { _ in
-            let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
-
-            if !self.isAudioOnly, authStatus == .notDetermined {
-                AVCaptureDevice.requestAccess(for: .video) { _ in
-                    self.createLocalMedia()
-                    self.joinCall()
-                }
-            } else {
+            // Wait for mic (and camera on video calls) before creating tracks / joining.
+            // Otherwise the first call can join without local media if the user is still
+            // answering the system permission prompts.
+            self.requestCallMediaPermissions {
                 self.createLocalMedia()
                 self.joinCall()
             }
+        }
+    }
+
+    /// Requests not-yet-determined mic/camera access, then continues. Already decided statuses skip prompts.
+    private func requestCallMediaPermissions(completion: @escaping () -> Void) {
+        func requestCameraThenFinish() {
+            guard !self.isAudioOnly,
+                  AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined else {
+                completion()
+                return
+            }
+
+            AVCaptureDevice.requestAccess(for: .video) { _ in
+                DispatchQueue.main.async {
+                    completion()
+                }
+            }
+        }
+
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in
+                DispatchQueue.main.async {
+                    requestCameraThenFinish()
+                }
+            }
+        } else {
+            requestCameraThenFinish()
         }
     }
 
@@ -495,6 +519,28 @@ internal class NCCallController: NSObject, NCPeerConnectionDelegate, NCSignaling
     public func isMicrophoneAccessAvailable() -> Bool {
         let authStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         return authStatus == .authorized
+    }
+
+    /// If the user granted mic/camera after the call already started without those tracks, recreate local media and republish.
+    public func refreshLocalMediaAfterPermissionChange() {
+        let needsAudio = self.room.canPublishAudio && self.isMicrophoneAccessAvailable() && self.localAudioTrack == nil
+        let needsVideo = !self.isAudioOnly && self.room.canPublishVideo && self.isCameraAccessAvailable() && self.localVideoTrack == nil
+
+        guard needsAudio || needsVideo else {
+            return
+        }
+
+        NCLog.log("Refreshing local media after permission change (audio=\(needsAudio), video=\(needsVideo))")
+        self.createLocalMedia()
+
+        WebRTCCommon.shared.dispatch {
+            if self.publisherPeerConnection != nil {
+                // Publisher may have been created with no tracks; reconnect to publish the new media.
+                self.forceReconnect()
+            } else if self.joinedCallOnce {
+                self.createPublisherPeerConnection()
+            }
+        }
     }
 
     public func stopCapturing() {

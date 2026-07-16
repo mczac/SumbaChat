@@ -21,6 +21,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setSpeakerViewStripeHidden:(BOOL)hidden;
 + (BOOL)speakerViewStripeHidden;
 
+/// Stored as MediaUploadMode raw value. Default is Automatic.
++ (void)setMediaUploadMode:(NSInteger)mode;
++ (NSInteger)mediaUploadMode;
+
 @end
 
 NS_ASSUME_NONNULL_END

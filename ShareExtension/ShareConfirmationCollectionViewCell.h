@@ -20,6 +20,7 @@ extern NSString *const kShareConfirmationTableCellNibName;
 - (void)setPlaceHolderImage:(UIImage *)image;
 - (void)setPlaceHolderText:(NSString *)text;
 - (void)setPreviewImage:(UIImage *)image;
+- (void)setShowsVideoIndicator:(BOOL)showsVideoIndicator;
 
 @end
 

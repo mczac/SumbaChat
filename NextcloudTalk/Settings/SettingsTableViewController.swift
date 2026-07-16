@@ -25,11 +25,12 @@ enum AccountSettingsOptions: Int {
     case kAccountSettingsReadStatusPrivacy = 0
     case kAccountSettingsTypingPrivacy
     case kAccountSettingsContactsSync
+    case kAccountSettingsRecents
 }
 
 enum ConfigurationSectionOption: Int {
-    case kConfigurationSectionOptionVideo = 0
-    case kConfigurationSectionOptionRecents
+    case kConfigurationSectionOptionUploadMedia = 0
+    case kConfigurationSectionOptionVideo
 }
 
 enum AdvancedSectionOption: Int {
@@ -141,7 +142,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
             sections.append(SettingsSection.kSettingsSectionOtherAccounts.rawValue)
         }
 
-        // Configuration section
+        // Compression section
         sections.append(SettingsSection.kSettingsSectionConfiguration.rawValue)
 
         // Advanced section
@@ -169,17 +170,21 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         if NCDatabaseManager.sharedInstance().serverHasTalkCapability(.phonebookSearch) {
             options.append(AccountSettingsOptions.kAccountSettingsContactsSync.rawValue)
         }
+
+        // Include calls in call history
+        options.append(AccountSettingsOptions.kAccountSettingsRecents.rawValue)
+
         return options
     }
 
     func getConfigurationSectionOptions() -> [Int] {
         var options = [Int]()
 
-        // Video quality
-        options.append(ConfigurationSectionOption.kConfigurationSectionOptionVideo.rawValue)
+        // Upload media compression
+        options.append(ConfigurationSectionOption.kConfigurationSectionOptionUploadMedia.rawValue)
 
-        // Calls in recents
-        options.append(ConfigurationSectionOption.kConfigurationSectionOptionRecents.rawValue)
+        // Call video quality
+        options.append(ConfigurationSectionOption.kConfigurationSectionOptionVideo.rawValue)
 
         return options
     }
@@ -394,12 +399,45 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
     // MARK: - Configuration
 
+    func presentUploadMediaModeSelector() {
+        let indexPath = self.getIndexPathForConfigurationOption(option: ConfigurationSectionOption.kConfigurationSectionOptionUploadMedia)
+        let currentMode = MediaUploadMode(rawValue: Int(NCUserDefaults.mediaUploadMode())) ?? .automatic
+
+        let optionsActionSheet = UIAlertController(title: NSLocalizedString("Upload Media", comment: ""), message: nil, preferredStyle: .actionSheet)
+
+        let modes: [(MediaUploadMode, String)] = [
+            (.noCompression, NSLocalizedString("No Compression", comment: "")),
+            (.automatic, NSLocalizedString("Automatic Compression", comment: "")),
+            (.chooseOnUpload, NSLocalizedString("Choose on upload", comment: ""))
+        ]
+
+        for (mode, title) in modes {
+            let action = UIAlertAction(title: title, style: .default) { _ in
+                NCUserDefaults.setMediaUploadMode(mode.rawValue)
+                self.tableView.beginUpdates()
+                self.tableView.reloadRows(at: [indexPath], with: .none)
+                self.tableView.endUpdates()
+            }
+
+            if mode == currentMode {
+                action.setValue(UIImage(named: "checkmark")?.withRenderingMode(_: .alwaysOriginal), forKey: "image")
+            }
+            optionsActionSheet.addAction(action)
+        }
+
+        optionsActionSheet.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: ""), style: .cancel, handler: nil))
+        optionsActionSheet.popoverPresentationController?.sourceView = self.tableView
+        optionsActionSheet.popoverPresentationController?.sourceRect = self.tableView.rectForRow(at: indexPath)
+
+        self.present(optionsActionSheet, animated: true, completion: nil)
+    }
+
     func presentVideoResoultionsSelector() {
         let videoConfIndexPath = self.getIndexPathForConfigurationOption(option: ConfigurationSectionOption.kConfigurationSectionOptionVideo)
         let videoResolutions = NCSettingsController.sharedInstance().videoSettingsModel.availableVideoResolutions()
         let storedResolution = NCSettingsController.sharedInstance().videoSettingsModel.currentVideoResolutionSettingFromStore()
 
-        let optionsActionSheet = UIAlertController(title: NSLocalizedString("Video quality", comment: ""), message: nil, preferredStyle: .actionSheet)
+        let optionsActionSheet = UIAlertController(title: NSLocalizedString("Call Video Quality", comment: ""), message: nil, preferredStyle: .actionSheet)
 
         for resolution in videoResolutions {
             let readableResolution = NCSettingsController.sharedInstance().videoSettingsModel.readableResolution(resolution)
@@ -618,7 +656,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         case SettingsSection.kSettingsSectionOtherAccounts.rawValue:
             return NSLocalizedString("Other Accounts", comment: "")
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
-            return NSLocalizedString("Configuration", comment: "")
+            return NSLocalizedString("Compression", comment: "")
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             return NSLocalizedString("Advanced", comment: "")
         case SettingsSection.kSettingsSectionAbout.rawValue:
@@ -735,6 +773,8 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         let options = getConfigurationSectionOptions()
         let option = options[indexPath.row]
         switch option {
+        case ConfigurationSectionOption.kConfigurationSectionOptionUploadMedia.rawValue:
+            self.presentUploadMediaModeSelector()
         case ConfigurationSectionOption.kConfigurationSectionOptionVideo.rawValue:
             self.presentVideoResoultionsSelector()
         default:
@@ -852,6 +892,15 @@ extension SettingsTableViewController {
             cell.selectionStyle = .none
             return cell
 
+        case AccountSettingsOptions.kAccountSettingsRecents.rawValue:
+            let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: userSettingsCellIdentifier, style: .default)
+            cell.textLabel?.text = NSLocalizedString("Include calls in call history", comment: "")
+            cell.setSettingsImage(image: UIImage(systemName: "clock.arrow.circlepath")?.applyingSymbolConfiguration(iconConfiguration))
+            cell.selectionStyle = .none
+            cell.accessoryView = includeInRecentsSwitch
+            includeInRecentsSwitch.isOn = NCUserDefaults.includeCallsInRecents()
+            return cell
+
         default:
             return UITableViewCell()
         }
@@ -887,9 +936,22 @@ extension SettingsTableViewController {
         let option = options[indexPath.row]
 
         switch option {
+        case ConfigurationSectionOption.kConfigurationSectionOptionUploadMedia.rawValue:
+            let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: configurationCellIdentifier, style: .default)
+            cell.textLabel?.text = NSLocalizedString("Upload Media", comment: "")
+            cell.setSettingsImage(image: UIImage(systemName: "arrow.up.circle")?.applyingSymbolConfiguration(iconConfiguration))
+
+            let modeLabel = UILabel()
+            modeLabel.text = self.readableMediaUploadMode(MediaUploadMode(rawValue: Int(NCUserDefaults.mediaUploadMode())) ?? .automatic)
+            modeLabel.textColor = .secondaryLabel
+            modeLabel.sizeToFit()
+            cell.accessoryView = modeLabel
+
+            return cell
+
         case ConfigurationSectionOption.kConfigurationSectionOptionVideo.rawValue:
             let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: configurationCellIdentifier, style: .default)
-            cell.textLabel?.text = NSLocalizedString("Video quality", comment: "")
+            cell.textLabel?.text = NSLocalizedString("Call Video Quality", comment: "")
             cell.setSettingsImage(image: UIImage(systemName: "video")?.applyingSymbolConfiguration(iconConfiguration))
 
             let resolution = NCSettingsController.sharedInstance().videoSettingsModel.currentVideoResolutionSettingFromStore()
@@ -901,17 +963,21 @@ extension SettingsTableViewController {
 
             return cell
 
-        case ConfigurationSectionOption.kConfigurationSectionOptionRecents.rawValue:
-            let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: configurationCellIdentifier, style: .default)
-            cell.textLabel?.text = NSLocalizedString("Include calls in call history", comment: "")
-            cell.setSettingsImage(image: UIImage(systemName: "clock.arrow.circlepath")?.applyingSymbolConfiguration(iconConfiguration))
-            cell.selectionStyle = .none
-            cell.accessoryView = includeInRecentsSwitch
-            includeInRecentsSwitch.isOn = NCUserDefaults.includeCallsInRecents()
-            return cell
-
         default:
             return UITableViewCell()
+        }
+    }
+
+    func readableMediaUploadMode(_ mode: MediaUploadMode) -> String {
+        switch mode {
+        case .noCompression:
+            return NSLocalizedString("No Compression", comment: "")
+        case .automatic:
+            return NSLocalizedString("Automatic", comment: "")
+        case .chooseOnUpload:
+            return NSLocalizedString("Choose on upload", comment: "")
+        @unknown default:
+            return NSLocalizedString("Automatic", comment: "")
         }
     }
 

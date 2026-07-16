@@ -6,6 +6,7 @@
 
 #import "NCUserDefaults.h"
 
+#import "NCAppBranding.h"
 #import "NCKeyChainController.h"
 
 @implementation NCUserDefaults
@@ -15,6 +16,20 @@ NSString * const kNCBackgroundBlurEnabled       = @"ncBackgroundBlurEnabled";
 NSString * const kNCIncludeCallsInRecents       = @"ncIncludeCallsInRecents";
 NSString * const kNCPreferredCallViewMode       = @"ncPreferredCallViewMode";
 NSString * const kNCSpeakerViewStripeHidden     = @"ncSpeakerViewStripeHidden";
+NSString * const kNCMediaUploadMode             = @"ncMediaUploadMode";
+
++ (NSUserDefaults *)sharedAppGroupDefaults
+{
+    static NSUserDefaults *defaults;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        defaults = [[NSUserDefaults alloc] initWithSuiteName:groupIdentifier];
+        if (!defaults) {
+            defaults = [NSUserDefaults standardUserDefaults];
+        }
+    });
+    return defaults;
+}
 
 + (void)setPreferredCameraFlashMode:(NSInteger)flashMode
 {
@@ -70,6 +85,28 @@ NSString * const kNCSpeakerViewStripeHidden     = @"ncSpeakerViewStripeHidden";
 + (BOOL)speakerViewStripeHidden
 {
     return [[[NSUserDefaults standardUserDefaults] objectForKey:kNCSpeakerViewStripeHidden] boolValue];
+}
+
++ (void)setMediaUploadMode:(NSInteger)mode
+{
+    // Main app reads standard defaults. Mirror to App Group for Share Extension when entitled.
+    [[NSUserDefaults standardUserDefaults] setObject:@(mode) forKey:kNCMediaUploadMode];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [[self sharedAppGroupDefaults] setObject:@(mode) forKey:kNCMediaUploadMode];
+}
+
++ (NSInteger)mediaUploadMode
+{
+    id modeObject = [[NSUserDefaults standardUserDefaults] objectForKey:kNCMediaUploadMode];
+    if (modeObject == nil) {
+        modeObject = [[self sharedAppGroupDefaults] objectForKey:kNCMediaUploadMode];
+    }
+    if (modeObject == nil) {
+        // MediaUploadModeAutomatic
+        return 1;
+    }
+
+    return [modeObject integerValue];
 }
 
 @end

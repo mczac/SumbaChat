@@ -191,12 +191,12 @@ class NotificationService: UNNotificationServiceExtension {
               let file = NCMessageFileParameter(dictionary: fileDict), file.previewAvailable else {
 
             // No file/no preview -> show notification
-            self.createAndShowConversationNotification(withPushNotification: pushNotification)
+            self.createAndShowConversationNotification(withPushNotification: pushNotification, serverNotification: serverNotification)
             return
         }
 
         // First try to create the conversation notification, and only afterwards try to retrieve the image preview
-        self.createConversationNotification(withPushNotification: pushNotification) {
+        self.createConversationNotification(withPushNotification: pushNotification, serverNotification: serverNotification) {
             SDWebImageDownloader.shared.config.downloadTimeout = 25.0
             NCAPIController.shared.getPreviewForFile(file.parameterId, width: 0, height: 512, forAccount: account) { image, _ in
                 if let image, let attachment = self.getNotificationAttachment(fromImage: image, forAccountId: account.accountId) {
@@ -213,7 +213,7 @@ class NotificationService: UNNotificationServiceExtension {
         self.bestAttemptContent?.title = serverNotification.subject
         self.bestAttemptContent?.body = serverNotification.message
 
-        self.createAndShowConversationNotification(withPushNotification: pushNotification)
+        self.createAndShowConversationNotification(withPushNotification: pushNotification, serverNotification: serverNotification)
     }
 
     private func handleFederationNotification(withServerNotification serverNotification: NCNotification, withPushNotification pushNotification: NCPushNotification, forAccount account: TalkAccount) {
@@ -222,12 +222,19 @@ class NotificationService: UNNotificationServiceExtension {
         self.bestAttemptContent?.body = serverNotification.message
 
         NCDatabaseManager.sharedInstance().increasePendingFederationInvitation(forAccountId: account.accountId)
-        self.createAndShowConversationNotification(withPushNotification: pushNotification)
+        self.createAndShowConversationNotification(withPushNotification: pushNotification, serverNotification: serverNotification)
     }
 
-    private func createConversationNotification(withPushNotification pushNotification: NCPushNotification, withCompletionBlock completionBlock: @escaping () -> Void) {
-        if let bestAttemptContent = self.bestAttemptContent, let room = NCDatabaseManager.sharedInstance().room(withToken: pushNotification.roomToken, forAccountId: pushNotification.accountId) {
-            NCIntentController.sharedInstance().getInteractionFor(room, withTitle: bestAttemptContent.title) { sendMessageIntent in
+    private func createConversationNotification(withPushNotification pushNotification: NCPushNotification,
+                                                serverNotification: NCNotification? = nil,
+                                                withCompletionBlock completionBlock: @escaping () -> Void) {
+        if let bestAttemptContent = self.bestAttemptContent,
+           let room = NCDatabaseManager.sharedInstance().room(withToken: pushNotification.roomToken, forAccountId: pushNotification.accountId) {
+
+            // Prefer Mika's branded avatar for Sumba Assistant bot messages (not the 1:1 room peer avatar).
+            let senderAvatar: UIImage? = (serverNotification?.isMikaBotAuthor == true) ? UIImage(named: "mika-avatar") : nil
+
+            NCIntentController.sharedInstance().getInteractionFor(room, withTitle: bestAttemptContent.title, avatarImage: senderAvatar) { sendMessageIntent in
                 self.sendMessageIntent = sendMessageIntent
                 completionBlock()
             }
@@ -236,14 +243,20 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
-    private func createAndShowConversationNotification(withPushNotification pushNotification: NCPushNotification) {
-        self.createConversationNotification(withPushNotification: pushNotification) {
+    private func createAndShowConversationNotification(withPushNotification pushNotification: NCPushNotification,
+                                                       serverNotification: NCNotification? = nil) {
+        self.createConversationNotification(withPushNotification: pushNotification, serverNotification: serverNotification) {
             self.showBestAttemptNotification()
         }
     }
 
     private func showBestAttemptNotification() {
         guard let bestAttemptContent = self.bestAttemptContent else { return }
+
+        // Fallback when rich parameters were unavailable (e.g. server fetch failed).
+        if bestAttemptContent.title.contains("Mika (Bot)") {
+            bestAttemptContent.title = bestAttemptContent.title.replacingOccurrences(of: "Mika (Bot)", with: NCNotification.mikaAssistantDisplayName)
+        }
 
         // When we have a send message intent, we use it, otherwise we fall back to the non-conversation-notification one
         if let sendMessageIntent = self.sendMessageIntent, let updatedContent = try? bestAttemptContent.updating(from: sendMessageIntent) {

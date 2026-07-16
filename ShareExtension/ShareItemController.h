@@ -41,6 +41,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)removeAllItems;
 - (UIImage * _Nullable)getImageFromItem:(ShareItem *)item;
 
+/// Compress staged originals before upload. Provider returns MediaUploadCompressionLevel raw value.
+/// `progress` reports overall prepare fraction 0…1 (main thread), including in-flight video export.
+- (void)prepareItemsForUploadWithLevelProvider:(NSInteger (^)(ShareItem *item))levelProvider
+                                      progress:(void (^ _Nullable)(float fraction))progress
+                                   completion:(void (^)(void))completion;
+
 @end
 
 NS_ASSUME_NONNULL_END

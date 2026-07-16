@@ -34,22 +34,28 @@
 
 - (void)getInteractionForRoom:(NCRoom *)room withTitle:(NSString *)title withCompletionBlock:(GetInteractionForRoomCompletionBlock)block
 {
-    (void)[[AvatarManager shared] getAvatarFor:room with:UIUserInterfaceStyleLight completionBlock:^(UIImage *avatarImage) {
-        if (!avatarImage) {
+    [self getInteractionForRoom:room withTitle:title avatarImage:nil withCompletionBlock:block];
+}
+
+- (void)getInteractionForRoom:(NCRoom *)room withTitle:(NSString *)title avatarImage:(UIImage *)avatarImage withCompletionBlock:(GetInteractionForRoomCompletionBlock)block
+{
+    void (^buildIntent)(UIImage *) = ^(UIImage *resolvedAvatar) {
+        if (!resolvedAvatar) {
             if (block) {
                 block(nil);
             }
             return;
         }
 
-        if (avatarImage.sd_isVector) {
+        UIImage *avatarImageForIntent = resolvedAvatar;
+        if (avatarImageForIntent.sd_isVector) {
             // INImage does not support SVGs -> render them
-            avatarImage = [[AvatarManager shared] createRenderedImageWithImage:avatarImage];
+            avatarImageForIntent = [[AvatarManager shared] createRenderedImageWithImage:avatarImageForIntent];
         }
 
         INSpeakableString *groupName = [[INSpeakableString alloc] initWithSpokenPhrase:title];
         INPersonHandle *handle = [[INPersonHandle alloc] initWithValue:nil type:INPersonHandleTypeUnknown];
-        INImage *image = [INImage imageWithUIImage:avatarImage];
+        INImage *image = [INImage imageWithUIImage:avatarImageForIntent];
 
         INPerson *person = [[INPerson alloc]
                             initWithPersonHandle:handle
@@ -81,6 +87,15 @@
                 }
             }
         }];
+    };
+
+    if (avatarImage) {
+        buildIntent(avatarImage);
+        return;
+    }
+
+    (void)[[AvatarManager shared] getAvatarFor:room with:UIUserInterfaceStyleLight completionBlock:^(UIImage *roomAvatarImage) {
+        buildIntent(roomAvatarImage);
     }];
 }
 

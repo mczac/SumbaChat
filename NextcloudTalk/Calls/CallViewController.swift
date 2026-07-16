@@ -428,6 +428,9 @@ class CallViewController: UIViewController,
     // MARK: - App lifecycle notifications
 
     func appDidBecomeActive(notification: NSNotification) {
+        // If the user granted mic/camera in Settings (or finished a delayed system prompt), pick up tracks now.
+        self.callController?.refreshLocalMediaAfterPermissionChange()
+
         if callController != nil, !isAudioOnly, !userDisabledVideo {
             // Only enabled video if it was not disabled by the user
             self.enableLocalVideo()

@@ -963,7 +963,7 @@ import Toast
             self.presentDocumentPicker()
         }
 
-        let ncFilesAction = UIAction(title: filesAppName, image: UIImage(named: "logo-action")?.withRenderingMode(.alwaysTemplate)) { [unowned self] _ in
+        let ncFilesAction = UIAction(title: filesAppName, image: UIImage(systemName: "water.waves")) { [unowned self] _ in
             self.textView.resignFirstResponder()
             self.presentNextcloudFilesBrowser()
         }

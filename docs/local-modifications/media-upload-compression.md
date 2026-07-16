@@ -4,31 +4,52 @@ Branch: `feature/media-upload-compression`
 
 ## What changed
 
-Photos and videos are compressed before upload staging in `ShareItemController`.
+Photos and videos are compressed **on Send** (after preview), driven by the
+user **Upload Media** setting — not by server capabilities.
 
-| File | Change |
-|------|--------|
-| `NextcloudTalk/Settings/MediaUploadPreprocessor.swift` | **New** — image resize/JPEG + video export helper |
-| `ShareExtension/ShareItemController.m` | Compress images/videos when items are staged |
-| `NextcloudTalk.xcodeproj/project.pbxproj` | Include preprocessor in ShareExtension target |
+| File | Role |
+|------|------|
+| `NextcloudTalk/Settings/MediaUploadPreprocessor.swift` | Presets (None / Moderate / High), size estimates, Automatic policy |
+| `NextcloudTalk/Settings/NCUserDefaults.m` | Persists Upload Media mode in App Group |
+| `NextcloudTalk/Settings/SettingsTableViewController.swift` | COMPRESSION section UI |
+| `ShareExtension/ShareItemController.m` | Stages originals; compresses on Send |
+| `ShareExtension/ShareConfirmationViewController.swift` | Choose-on-upload quality UI; Preparing → Upload |
 
-## Behavior
+## User settings
 
-- **Photos** (except GIF): server-configurable maximum dimension and JPEG quality
-- **Videos**: server-configurable export preset → `.mp4`
-- **Defaults without server settings**: images 1280px / JPEG quality 45; videos `low`
-- **GIF / pasted PNG**: unchanged
-- **Video compression failure or larger output**: falls back to original file
+**Settings → Compression**
 
-## Server capability contract
+| Row | Options |
+|-----|---------|
+| Upload Media | No Compression / Automatic Compression / Choose on upload (**default: Automatic**) |
+| Call Video Quality | WebRTC call camera resolution (unchanged behavior) |
 
-The app reads an effective compression policy from the authenticated OCS
-capabilities response:
+**Include calls in call history** lives in the untitled account section (after phone number integration).
 
-`GET /ocs/v1.php/cloud/capabilities?format=json`
+### Upload Media modes
 
-Add this object under
-`ocs.data.capabilities.spreed.config.attachments`:
+| Mode | Preview | On Send |
+|------|---------|---------|
+| No Compression | Original | Upload as staged |
+| Automatic | Original | Always compress ≥ Moderate; escalate to High if estimate > 16 MB (or > ~8 MB on cellular) |
+| Choose on upload | Original + quality control | Compress chosen None / Moderate / High |
+
+### Compression presets
+
+| Level | Images | Videos |
+|-------|--------|--------|
+| None | Passthrough | Passthrough |
+| Moderate | max 1920px, JPEG 80% | `720p` |
+| High | max 1280px, JPEG 45% | `low` |
+
+Automatic never skips compression for files under 16 MB (avoids large RAW/HEIC near the cap). WhatsApp-style: standard quality always recompresses; 16 MB is an escalation cap, not a skip threshold.
+
+## Server capability contract (stored, not applied on upload)
+
+The app still parses and stores `spreed.config.attachments.upload-compression`
+from capabilities (hash-change refresh unchanged) so the server option remains
+available for other clients or future use. **iOS uploads ignore those values**
+and use the user Upload Media preference only.
 
 ```json
 {
@@ -47,87 +68,18 @@ Add this object under
 }
 ```
 
-### Parameters
-
-| Parameter | Type | Accepted values | App fallback |
-|-----------|------|-----------------|--------------|
-| `enabled` | boolean | `true`, `false` | `true` |
-| `images.enabled` | boolean | `true`, `false` | `true` |
-| `images.max-dimension` | integer pixels | `320...8192` | `1280` |
-| `images.jpeg-quality` | integer percent | `10...100` | `45` |
-| `videos.enabled` | boolean | `true`, `false` | `true` |
-| `videos.preset` | string | `low`, `medium`, `high`, `480p`, `720p`, `1080p`, `2160p` | `low` |
-
-Invalid or missing numeric and preset values use the app fallback. JSON values
-must use their documented types; numeric strings are not accepted.
-
-The response is already authenticated, so the server may return values merged
-from a server-wide admin policy and a per-user override. The iOS app stores the
-effective values per account and does not need to know where the server stored
-them.
-
-### Recommended server storage
-
-Store server-wide values in Nextcloud app config (`oc_appconfig`) under a
-custom app such as `talk_upload_policy`, and expose them through an
-`OCP\Capabilities\ICapability` provider. Nextcloud deep-merges capability
-providers, allowing the custom app to append this object to
-`spreed.config.attachments` without replacing Talk's existing attachment keys.
-
-Suggested app-config keys:
-
-- `enabled`
-- `image_enabled`
-- `image_max_dimension`
-- `image_jpeg_quality`
-- `video_enabled`
-- `video_preset`
-
-If an admin changes the policy, clients need a fresh capabilities response.
-Either include these settings in Talk's capabilities hash calculation or
-trigger/refetch capabilities in another reliable way.
-
-Changing the persisted capability model raised the shared Realm schema version
-to 91. Run the main app once after installing the build before invoking the
-share extension so the main app can migrate the shared Realm.
-
-## Branded login
-
-SumbaChat locks login to `https://cloud.example.com` via `forceDomain` in
-`NCAppBranding.m`. `SumbaLoginViewController` presents native username and
-password fields in a keyboard-safe scroll view. It exchanges those credentials
-for a per-device app password through `/ocs/v2.php/core/getapppassword`, stores
-only the app password in Keychain, clears the entered password after success,
-and skips the server-address/web authorization screens. This flow assumes 2FA
-is not required by the server.
-
 ## Preparing media HUD
 
-While photos/videos are compressed before upload, `ShareConfirmationViewController`
-shows an indeterminate "Preparing…" HUD and disables Send until preparation
-finishes.
+On Send (when compression is needed), `ShareConfirmationViewController` shows one
+locked **square** annular HUD for both phases:
 
-## Revert this feature only
+1. **Preparing…** — determinate progress from video export / per-item compress
+   (≈55% of the ring); placeholder details line keeps title Y aligned with phase 2
+2. **Uploading** / **N media file(s)** — remaining ring for network upload
 
-```bash
-cd /Users/peterzakharov/Developer/NextCloutTalk
-git checkout main -- ShareExtension/ShareItemController.m
-git rm NextcloudTalk/Settings/MediaUploadPreprocessor.swift
-git checkout main -- NextcloudTalk.xcodeproj/project.pbxproj
-```
+Bezel: solid `.systemBackground`, separator border + light shadow so it stays
+visible on white previews.
 
-Or discard the whole branch:
+## GIF / pasted PNG
 
-```bash
-git checkout main
-git branch -D feature/media-upload-compression
-```
-
-## Revert everything on this branch
-
-```bash
-git checkout main
-git branch -D feature/media-upload-compression
-```
-
-(ADC signing changes from the initial setup are still uncommitted local edits on this branch.)
+Unchanged (GIF skipped; pasted PNG data path unchanged).

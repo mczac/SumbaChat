@@ -58,7 +58,7 @@ public class NCNotification: NSObject {
 
     public var chatMessageAuthor: String {
         if let userDict = subjectRichParameters["user"] as? [AnyHashable: Any], let userName = userDict["name"] as? String {
-            return userName
+            return Self.displayName(forAuthorName: userName, authorId: userDict["id"] as? String, authorType: userDict["type"] as? String)
         }
 
         if let guestDict = subjectRichParameters["guest"] as? [AnyHashable: Any], let guestName = guestDict["name"] as? String {
@@ -66,6 +66,51 @@ public class NCNotification: NSObject {
         }
 
         return NSLocalizedString("Guest", comment: "")
+    }
+
+    /// True when the notification author is a Talk bot (used for push avatar overrides).
+    public var isBotAuthor: Bool {
+        guard let userDict = subjectRichParameters["user"] as? [AnyHashable: Any] else {
+            return false
+        }
+        if let type = userDict["type"] as? String, type == AttendeeType.bots.rawValue {
+            return true
+        }
+        if let authorId = userDict["id"] as? String, authorId.hasPrefix("bot-") {
+            return true
+        }
+        if let name = userDict["name"] as? String, name.localizedCaseInsensitiveContains("(Bot)") {
+            return true
+        }
+        return false
+    }
+
+    /// Sumba Assistant bot shown in chat as Mika — use branded push title/avatar.
+    public var isMikaBotAuthor: Bool {
+        guard isBotAuthor,
+              let userDict = subjectRichParameters["user"] as? [AnyHashable: Any] else {
+            return false
+        }
+        let name = (userDict["name"] as? String ?? "").lowercased()
+        let authorId = (userDict["id"] as? String ?? "").lowercased()
+        return name.contains("mika") || authorId.contains("mika")
+    }
+
+    public static let mikaAssistantDisplayName = "Mika (Sumba Assistant)"
+
+    private static func displayName(forAuthorName name: String, authorId: String?, authorType: String?) -> String {
+        let isBot = authorType == AttendeeType.bots.rawValue
+            || (authorId?.hasPrefix("bot-") ?? false)
+            || name.localizedCaseInsensitiveContains("(Bot)")
+        let looksLikeMika = name.lowercased().contains("mika") || (authorId?.lowercased().contains("mika") ?? false)
+
+        if isBot && looksLikeMika {
+            return mikaAssistantDisplayName
+        }
+        if name == "Mika (Bot)" {
+            return mikaAssistantDisplayName
+        }
+        return name
     }
 
     public var chatMessageTitle: String {
