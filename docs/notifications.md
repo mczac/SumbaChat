@@ -34,9 +34,9 @@ Debug builds use `NextcloudTalk/NextcloudTalk.entitlements` with
 Release / Archive / TestFlight builds use
 `NextcloudTalk/NextcloudTalkRelease.entitlements` with
 `aps-environment = production` and the release proxy
-(`push.example.com`). Release signing is set to
-**Apple Distribution** (Automatic) so Xcode can create App Store profiles
-with production push.
+(`push.example.com`). Keep **Automatically manage signing** with
+**Apple Development**; Xcode Cloud / Archive export switches to
+distribution certificates and App Store profiles for you.
 
 After archiving in Xcode (Product → Archive → Distribute App →
 App Store Connect), confirm the exported app has production push:
