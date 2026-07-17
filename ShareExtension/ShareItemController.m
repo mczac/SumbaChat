@@ -855,23 +855,32 @@
     [itemsToCompress setArray:sortedItems];
     [levelsToCompress setArray:sortedLevels];
 
-    // Multi-video: ExportSession on a dedicated serial queue + full session teardown between files
-    // (public AVFoundation pattern — main-thread session churn correlated with Nth-file process death).
-    unsigned long long totalBytes = 0;
+    // Multi-video jetsam guard: if Settings chose Bitrate / AVAssetWriter but this Send has
+    // 2+ videos, force AVAssetExportSession + serial teardown. Parallel / multi Writer encodes
+    // hit mediaserverd memory and crashed (instant relaunch mid-prepare). Photos do not count —
+    // a single video with photos still uses Writer when Bitrate is selected.
+    NSInteger videoToCompress = 0;
+    unsigned long long videoBytes = 0;
     for (ShareItem *item in itemsToCompress) {
-        totalBytes += [[NSFileManager.defaultManager attributesOfItemAtPath:item.filePath error:nil] fileSize];
+        NSString *ext = item.fileName.pathExtension.lowercaseString;
+        if (ext.length > 0 && [MediaUploadPreprocessor isVideoFileExtension:ext]) {
+            videoToCompress += 1;
+            videoBytes += [[NSFileManager.defaultManager attributesOfItemAtPath:item.filePath error:nil] fileSize];
+        }
     }
-    BOOL heavyBatch = (totalToCompress >= 2 && totalBytes >= 40ULL * 1024ULL * 1024ULL);
+    BOOL multiVideo = (videoToCompress >= 2);
+    BOOL heavyBatch = (multiVideo && videoBytes >= 40ULL * 1024ULL * 1024ULL);
+    BOOL writerChosen = [MediaUploadDebugSettings sharedSettings].usesAssetWriter;
     if (heavyBatch) {
         self.batchVideoMaxEdgeCap = 640;
         MediaUploadPreprocessor.preferExportSession = YES;
-        [NCLog log:[NSString stringWithFormat:@"ShareItemController: batch ExportSession serial teardown (items=%ld total=%.1f MB edgeCap=640)",
-                    (long)totalToCompress, totalBytes / 1048576.0]];
-    } else if (totalToCompress >= 2) {
+        [NCLog log:[NSString stringWithFormat:@"ShareItemController: multi-video → ExportSession (jetsam avoid; SettingsWriter=%d videos=%ld video=%.1f MB edgeCap=640)",
+                    writerChosen ? 1 : 0, (long)videoToCompress, videoBytes / 1048576.0]];
+    } else if (multiVideo) {
         self.batchVideoMaxEdgeCap = 720;
         MediaUploadPreprocessor.preferExportSession = YES;
-        [NCLog log:[NSString stringWithFormat:@"ShareItemController: batch ExportSession serial teardown (items=%ld edgeCap=720)",
-                    (long)totalToCompress]];
+        [NCLog log:[NSString stringWithFormat:@"ShareItemController: multi-video → ExportSession (jetsam avoid; SettingsWriter=%d videos=%ld edgeCap=720)",
+                    writerChosen ? 1 : 0, (long)videoToCompress]];
     } else {
         self.batchVideoMaxEdgeCap = 0;
         MediaUploadPreprocessor.preferExportSession = NO;
@@ -902,7 +911,7 @@
         }
     };
 
-    BOOL usedExportBatch = heavyBatch || (totalToCompress >= 2);
+    BOOL usedExportBatch = multiVideo;
     void (^finishAll)(void) = ^{
         void (^done)(void) = ^{
             typeof(self) strongSelf = weakSelf;

@@ -90,6 +90,8 @@ import UniformTypeIdentifiers
     private static let storageKey = "ncMediaUploadDebugSettings"
     private static let lock = NSLock()
     private static var cached: MediaUploadDebugSettings?
+    /// Bytes last loaded/saved — used so Share Extension picks up main-app UI changes.
+    private static var cachedData: Data?
 
     public var videoEngineRaw: Int
     public var perFileMaxBytes: Int64
@@ -133,6 +135,86 @@ import UniformTypeIdentifiers
         case .none: return nil
         @unknown default: return nil
         }
+    }
+
+    private static func engineName(_ raw: Int) -> String {
+        (MediaUploadVideoEngine(rawValue: raw) ?? .assetWriter) == .assetWriter ? "writer" : "exportSession"
+    }
+
+    /// Compact one-line dump for NCLog when settings are saved or reloaded.
+    public var summaryForLog: String {
+        func profileLine(_ name: String, _ c: MediaUploadProfileConfig) -> String {
+            String(format: "%@[q=%d imgEdge=%d rate=%.3fMB/s vidMax=%.1fMB vidEdge=%d fps=%.0f preset=%@]",
+                   name,
+                   c.imageJPEGQuality,
+                   c.imageMaxDimension,
+                   c.videoRateMBps,
+                   Double(c.videoMaxBytes) / 1_048_576.0,
+                   c.videoMaxEdge,
+                   c.videoFPS,
+                   c.exportPreset)
+        }
+        return String(format: "engine=%@ perFile=%.1fMB package=%.1fMB %@ %@ %@",
+                      Self.engineName(videoEngineRaw),
+                      Double(perFileMaxBytes) / 1_048_576.0,
+                      Double(packageMaxBytes) / 1_048_576.0,
+                      profileLine("low", low),
+                      profileLine("med", medium),
+                      profileLine("high", high))
+    }
+
+    /// Field-level before → after for NCLog (compares against last persisted snapshot).
+    public func changeDescription(from previous: MediaUploadDebugSettings?) -> String {
+        guard let previous else {
+            return "initial \(summaryForLog)"
+        }
+        var parts: [String] = []
+        if previous.videoEngineRaw != videoEngineRaw {
+            parts.append("engine: \(Self.engineName(previous.videoEngineRaw)) → \(Self.engineName(videoEngineRaw))")
+        }
+        if previous.perFileMaxBytes != perFileMaxBytes {
+            parts.append(String(format: "perFile: %.1fMB → %.1fMB",
+                                Double(previous.perFileMaxBytes) / 1_048_576.0,
+                                Double(perFileMaxBytes) / 1_048_576.0))
+        }
+        if previous.packageMaxBytes != packageMaxBytes {
+            parts.append(String(format: "package: %.1fMB → %.1fMB",
+                                Double(previous.packageMaxBytes) / 1_048_576.0,
+                                Double(packageMaxBytes) / 1_048_576.0))
+        }
+        func appendProfileDiff(_ name: String, _ before: MediaUploadProfileConfig, _ after: MediaUploadProfileConfig) {
+            if before.imageJPEGQuality != after.imageJPEGQuality {
+                parts.append("\(name).jpegQuality: \(before.imageJPEGQuality) → \(after.imageJPEGQuality)")
+            }
+            if before.imageMaxDimension != after.imageMaxDimension {
+                parts.append("\(name).imgEdge: \(before.imageMaxDimension) → \(after.imageMaxDimension)")
+            }
+            if before.videoRateMBps != after.videoRateMBps {
+                parts.append(String(format: "%@.rate: %.3f → %.3f MB/s", name, before.videoRateMBps, after.videoRateMBps))
+            }
+            if before.videoMaxBytes != after.videoMaxBytes {
+                parts.append(String(format: "%@.vidMax: %.1f → %.1f MB",
+                                    name,
+                                    Double(before.videoMaxBytes) / 1_048_576.0,
+                                    Double(after.videoMaxBytes) / 1_048_576.0))
+            }
+            if before.videoMaxEdge != after.videoMaxEdge {
+                parts.append("\(name).vidEdge: \(before.videoMaxEdge) → \(after.videoMaxEdge)")
+            }
+            if before.videoFPS != after.videoFPS {
+                parts.append(String(format: "%@.fps: %.0f → %.0f", name, before.videoFPS, after.videoFPS))
+            }
+            if before.exportPreset != after.exportPreset {
+                parts.append("\(name).preset: \(before.exportPreset) → \(after.exportPreset)")
+            }
+        }
+        appendProfileDiff("low", previous.low, low)
+        appendProfileDiff("med", previous.medium, medium)
+        appendProfileDiff("high", previous.high, high)
+        if parts.isEmpty {
+            return "no field changes"
+        }
+        return parts.joined(separator: "; ")
     }
 
     /// Need ~10% savings before offering a compress chip (estimate slack).
@@ -304,7 +386,11 @@ import UniformTypeIdentifiers
     }
 
     /// Whether compressing this video at `level` is likely to shrink (≥10% smaller).
-    public static func videoCompressionLikelyShrinks(at fileURL: URL, level: MediaUploadCompressionLevel) -> Bool {
+    /// - Parameter forceExportSession: Multi-video chip/Send path forces ExportSession even when
+    ///   the debug engine is Writer — estimate and logs must match that path.
+    public static func videoCompressionLikelyShrinks(at fileURL: URL,
+                                                     level: MediaUploadCompressionLevel,
+                                                     forceExportSession: Bool = false) -> Bool {
         guard level != .none else { return true }
         guard let profile = shared().profile(for: level) else { return false }
         let original = MediaUploadPreprocessor.fileSizePublic(at: fileURL)
@@ -331,9 +417,10 @@ import UniformTypeIdentifiers
         let sourceTotalMbps = approximateSourceTotalMbps(fileBytes: original, durationSeconds: duration)
         let sourceVideoMbps = approximateSourceVideoMbps(fileBytes: original, durationSeconds: duration)
         let thresholdBytes = Int64(Double(original) * shrinkEnableMargin)
+        let batchForcesExport = forceExportSession || MediaUploadPreprocessor.preferExportSession
 
-        // ExportSession: prefer Apple's asset-aware estimate over Mbps guests.
-        if !shared().usesAssetWriter {
+        // ExportSession engine (non-batch): prefer Apple's asset-aware estimate over Mbps guests.
+        if !shared().usesAssetWriter, !batchForcesExport {
             if let appleBytes = appleEstimatedExportBytes(at: fileURL, presetKey: profile.exportPreset) {
                 let willShrink = appleBytes < thresholdBytes
                 let appleMbps = approximateSourceTotalMbps(fileBytes: appleBytes, durationSeconds: duration)
@@ -358,6 +445,32 @@ import UniformTypeIdentifiers
                 "MediaUploadHeuristic video %@ level=%ld engine=preset:%@ AppleEstimate unavailable → compress=YES (safe fallback)",
                 fileURL.lastPathComponent, level.rawValue, profile.exportPreset))
             return true
+        }
+
+        // Multi-video / preferExportSession: cheap preset guests (matches chip totals + Send).
+        if batchForcesExport || !shared().usesAssetWriter {
+            let expectedBytes = estimatedVideoBytesForExportPreset(at: fileURL,
+                                                                   profile: profile,
+                                                                   durationSeconds: duration,
+                                                                   originalSize: original)
+            let targetMbps = guestimatedExportPresetMbps(profile.exportPreset)
+            let willShrink = expectedBytes < thresholdBytes
+            NCLog.log(String(format:
+                "MediaUploadHeuristic video %@ level=%ld engine=preset:%@ (batch) duration=%.2fs original=%lld (%.2f MB) sourceTotal=%.3fMbps sourceVideo=%.3fMbps target=%.3fMbps expected=%lld (%.2f MB) threshold=%lld → %@",
+                fileURL.lastPathComponent,
+                level.rawValue,
+                profile.exportPreset,
+                duration,
+                original,
+                Double(original) / 1_048_576.0,
+                sourceTotalMbps,
+                sourceVideoMbps,
+                targetMbps,
+                expectedBytes,
+                Double(expectedBytes) / 1_048_576.0,
+                thresholdBytes,
+                willShrink ? "compress" : "skip"))
+            return willShrink
         }
 
         let targetMbps = targetVideoMbps(profile: profile, durationSeconds: duration)
@@ -412,7 +525,7 @@ import UniformTypeIdentifiers
 
         let sourceBpp = (Double(original) * 8.0) / Double(pixelSize.width * pixelSize.height)
         let targetBpp = expectedJPEGBitsPerPixel(qualityPercent: profile.imageJPEGQuality)
-        let expectedBytes = Int64((outPixels * targetBpp) / 8.0)
+        let expectedBytes = estimatedImageBytes(at: fileURL, profile: profile, originalSize: original)
         let thresholdBytes = Int64(Double(original) * shrinkEnableMargin)
 
         let willShrink: Bool
@@ -454,15 +567,34 @@ import UniformTypeIdentifiers
     }
 
     /// Rough output bpp for `jpegData(compressionQuality:)` (empirical, not a spec).
+    /// Low-q band calibrated against phone-camera JPEG re-encodes (prefer slight overestimate for chips).
     public static func expectedJPEGBitsPerPixel(qualityPercent: Int) -> Double {
         let q = min(100, max(1, qualityPercent))
         switch q {
-        case 1...20: return 0.45
-        case 21...40: return 0.8
+        case 1...20: return 0.25
+        case 21...40: return 0.7
         case 41...60: return 1.3
         case 61...80: return 2.2
         default: return 3.5
         }
+    }
+
+    /// Chip / heuristic size for a re-JPEG at `profile` (resize + bpp). Falls back to quality×original if pixels unknown.
+    public static func estimatedImageBytes(at fileURL: URL, profile: MediaUploadProfileConfig, originalSize: Int64) -> Int64 {
+        let cap = originalSize > 0 ? originalSize : Int64.max
+        guard let pixelSize = imagePixelSize(at: fileURL) else {
+            let q = Double(max(1, min(100, profile.imageJPEGQuality))) / 100.0
+            let factor = min(0.95, max(0.05, q * 0.65))
+            return max(12_288, min(Int64(Double(max(0, originalSize)) * factor), cap == Int64.max ? Int64.max : cap))
+        }
+        let maxEdge = CGFloat(max(320, profile.imageMaxDimension))
+        let longest = max(pixelSize.width, pixelSize.height)
+        let scale = longest > maxEdge ? maxEdge / longest : 1.0
+        let outPixels = Double(pixelSize.width * pixelSize.height) * Double(scale * scale)
+        guard outPixels > 0 else { return max(12_288, min(originalSize, cap)) }
+        let targetBpp = expectedJPEGBitsPerPixel(qualityPercent: profile.imageJPEGQuality)
+        let expected = Int64((outPixels * targetBpp) / 8.0)
+        return max(12_288, min(expected, cap == Int64.max ? expected : cap))
     }
 
     private static func imagePixelSize(at fileURL: URL) -> CGSize? {
@@ -487,12 +619,17 @@ import UniformTypeIdentifiers
     public static func compressionLevelLikelyUseful(_ level: MediaUploadCompressionLevel, forFileURLs fileURLs: [URL]) -> Bool {
         if level == .none { return true }
 
+        let videoCount = fileURLs.reduce(0) { partial, url in
+            partial + (MediaUploadPreprocessor.isVideo(fileExtension: url.pathExtension.lowercased()) ? 1 : 0)
+        }
+        let forceExportSession = videoCount >= 2
+
         var sawCompressible = false
         for url in fileURLs {
             let ext = url.pathExtension.lowercased()
             if MediaUploadPreprocessor.isVideo(fileExtension: ext) {
                 sawCompressible = true
-                if videoCompressionLikelyShrinks(at: url, level: level) {
+                if videoCompressionLikelyShrinks(at: url, level: level, forceExportSession: forceExportSession) {
                     return true
                 }
             } else if NCUtils.isImage(fileExtension: ext), ext != "gif" {
@@ -510,10 +647,16 @@ import UniformTypeIdentifiers
     /// Shared Send-path gate: compress this file at `level` only if likely to shrink.
     @objc(itemCompressionLikelyShrinksAtURL:level:)
     public static func itemCompressionLikelyShrinks(at fileURL: URL, level: MediaUploadCompressionLevel) -> Bool {
+        itemCompressionLikelyShrinks(at: fileURL, level: level, forceExportSession: false)
+    }
+
+    public static func itemCompressionLikelyShrinks(at fileURL: URL,
+                                                    level: MediaUploadCompressionLevel,
+                                                    forceExportSession: Bool) -> Bool {
         if level == .none { return false }
         let ext = fileURL.pathExtension.lowercased()
         if MediaUploadPreprocessor.isVideo(fileExtension: ext) {
-            return videoCompressionLikelyShrinks(at: fileURL, level: level)
+            return videoCompressionLikelyShrinks(at: fileURL, level: level, forceExportSession: forceExportSession)
         }
         if NCUtils.isImage(fileExtension: ext), ext != "gif" {
             return imageCompressionLikelyShrinks(at: fileURL, level: level)
@@ -525,42 +668,92 @@ import UniformTypeIdentifiers
     public static func shared() -> MediaUploadDebugSettings {
         lock.lock()
         defer { lock.unlock() }
-        if let cached {
-            return cached
+        // Re-read App Group every call so a warm Share Extension sees main-app Settings changes.
+        // Keep the in-memory object only while the persisted bytes are unchanged.
+        if let data = persistedData() {
+            if let cached, cachedData == data {
+                return cached
+            }
+            let reason: String
+            if cachedData == nil {
+                reason = "cold-load"
+            } else {
+                reason = "disk-changed"
+            }
+            if let loaded = try? JSONDecoder().decode(MediaUploadDebugSettings.self, from: data) {
+                cached = loaded
+                cachedData = data
+                let summary = loaded.summaryForLog
+                // Log outside the hot hit path only (reload / first load).
+                DispatchQueue.global(qos: .utility).async {
+                    NCLog.log("MediaUploadDebugSettings: cache reload (\(reason)) \(summary)")
+                }
+                return loaded
+            }
         }
-        let loaded = loadFromDefaults() ?? .default
-        cached = loaded
-        return loaded
+        let hadCache = cached != nil
+        let fallback = MediaUploadDebugSettings.default
+        cached = fallback
+        cachedData = try? JSONEncoder().encode(fallback)
+        let summary = fallback.summaryForLog
+        DispatchQueue.global(qos: .utility).async {
+            NCLog.log("MediaUploadDebugSettings: cache reload (\(hadCache ? "decode-failed→defaults" : "empty→defaults")) \(summary)")
+        }
+        return fallback
     }
 
     public static func invalidateCache() {
         lock.lock()
+        let hadCache = cached != nil
         cached = nil
+        cachedData = nil
         lock.unlock()
+        NCLog.log("MediaUploadDebugSettings: invalidateCache (hadCache=\(hadCache))")
     }
 
     public func save() {
         Self.lock.lock()
         defer { Self.lock.unlock() }
-        guard let data = try? JSONEncoder().encode(self) else { return }
+        // Disk still holds the previous snapshot (UI mutates the in-memory object before save).
+        let previous: MediaUploadDebugSettings?
+        if let oldData = Self.persistedData() {
+            previous = try? JSONDecoder().decode(MediaUploadDebugSettings.self, from: oldData)
+        } else {
+            previous = nil
+        }
+        let diff = changeDescription(from: previous)
+        guard let data = try? JSONEncoder().encode(self) else {
+            NCLog.log("MediaUploadDebugSettings: save FAILED (encode) pending=\(diff)")
+            return
+        }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
         UserDefaults.standard.synchronize()
+        var wroteGroup = false
         if let group = UserDefaults(suiteName: groupIdentifier) {
             group.set(data, forKey: Self.storageKey)
             group.synchronize()
+            wroteGroup = true
         }
         Self.cached = self
+        Self.cachedData = data
+        // Diff of what changed + full Low/Med/High snapshot (JPEG + video fields).
+        NCLog.log("MediaUploadDebugSettings: save (appGroup=\(wroteGroup)) changed: \(diff) | after: \(summaryForLog)")
     }
 
     public static func resetToDefaults() {
+        NCLog.log("MediaUploadDebugSettings: resetToDefaults")
         let fresh = MediaUploadDebugSettings.default
         fresh.save()
     }
 
-    private static func loadFromDefaults() -> MediaUploadDebugSettings? {
-        let data = UserDefaults.standard.data(forKey: storageKey)
-            ?? UserDefaults(suiteName: groupIdentifier)?.data(forKey: storageKey)
-        guard let data else { return nil }
-        return try? JSONDecoder().decode(MediaUploadDebugSettings.self, from: data)
+    /// App Group is the cross-process source of truth (main app ↔ Share Extension).
+    private static func persistedData() -> Data? {
+        if let group = UserDefaults(suiteName: groupIdentifier) {
+            group.synchronize()
+            if let data = group.data(forKey: storageKey) {
+                return data
+            }
+        }
+        return UserDefaults.standard.data(forKey: storageKey)
     }
 }

@@ -4,8 +4,7 @@
 //
 
 import AVFoundation
-import ImageIO
-import Network
+import ImageIO          
 import UIKit
 import UniformTypeIdentifiers
 
@@ -213,7 +212,7 @@ import UniformTypeIdentifiers
             }
         }
 
-        // Per-file cap X.
+        // File cap X
         var changed = true
         while changed {
             changed = false
@@ -224,7 +223,7 @@ import UniformTypeIdentifiers
             }
         }
 
-        // Package cap Y wins — escalate largest compressible items.
+        // Total cap Y
         while true {
             let estimates = fileURLs.indices.map { estimate(at: $0) }
             let total = estimates.reduce(Int64(0), +)
@@ -306,7 +305,9 @@ import UniformTypeIdentifiers
 /// Compresses photos and videos before they are uploaded.
 @objcMembers public class MediaUploadPreprocessor: NSObject {
 
-    /// Multi-video Send: use ExportSession (lighter than Writer) and enforce off-main serial teardown.
+    /// Set by ShareItemController when Send has 2+ videos.
+    /// Even if Settings chose Bitrate / AVAssetWriter, we force AVAssetExportSession for that
+    /// batch to avoid mediaserverd / jetsam memory hits that crashed multi-Writer encodes.
     @objc public static var preferExportSession = false
 
     /// One export at a time; asset/session created here — never on the main thread.
@@ -404,6 +405,8 @@ import UniformTypeIdentifiers
         }
 
         let debug = MediaUploadDebugSettings.shared()
+        // Settings Bitrate/Writer wins for a single video. Two or more videos set
+        // preferExportSession so we use ExportSession instead (jetsam / crash avoidance).
         let useWriter = debug.usesAssetWriter && !preferExportSession
         if useWriter, let profile = settings.profile {
             MediaUploadVideoWriter.compress(at: sourceURL,
@@ -431,7 +434,11 @@ import UniformTypeIdentifiers
         }
 
         if preferExportSession {
-            NCLog.log("MediaUploadPreprocessor: batch preferExportSession — \(sourceURL.lastPathComponent)")
+            let writerWasChosen = debug.usesAssetWriter
+            NCLog.log("MediaUploadPreprocessor: preferExportSession — \(sourceURL.lastPathComponent)"
+                + (writerWasChosen
+                   ? " (Settings=Writer; forcing ExportSession for multi-video to avoid jetsam/crash)"
+                   : " (Settings=ExportSession)"))
         }
 
         compressVideoWithExportSession(at: sourceURL,
@@ -597,10 +604,14 @@ import UniformTypeIdentifiers
             if extensionName == "gif" {
                 return LevelEstimates(none: none, low: none, medium: none, high: none)
             }
-            let low = min(heuristicCompressedByteCount(originalSize: originalSize, level: .low), none)
-            let medium = min(heuristicCompressedByteCount(originalSize: originalSize, level: .medium), low)
-            let high = min(heuristicCompressedByteCount(originalSize: originalSize, level: .high), medium)
-            return LevelEstimates(none: none, low: low, medium: medium, high: high)
+            // Same resize + bpp model as shrink heuristic (not original×quality — that overstates High badly).
+            let low = MediaUploadDebugSettings.estimatedImageBytes(at: fileURL, profile: debug.low, originalSize: originalSize)
+            let medium = MediaUploadDebugSettings.estimatedImageBytes(at: fileURL, profile: debug.medium, originalSize: originalSize)
+            let high = MediaUploadDebugSettings.estimatedImageBytes(at: fileURL, profile: debug.high, originalSize: originalSize)
+            return LevelEstimates(none: none,
+                                  low: min(low, none),
+                                  medium: min(medium, min(low, none)),
+                                  high: min(high, min(medium, min(low, none))))
         }
 
         if isVideo(fileExtension: extensionName) {
@@ -635,7 +646,7 @@ import UniformTypeIdentifiers
         var medium: Int64 = 0
         var high: Int64 = 0
         // Multi-video Send forces ExportSession (see ShareItemController preferExportSession).
-        // Chips must use preset guests (Medium=540p, High=low), not Writer rates.
+        // Chips + heuristic logs use preset guests for Low/Medium/High — not Writer rates.
         let videoCount = fileURLs.reduce(0) { partial, url in
             partial + (isVideo(fileExtension: url.pathExtension.lowercased()) ? 1 : 0)
         }
@@ -648,6 +659,11 @@ import UniformTypeIdentifiers
                isVideo(fileExtension: url.pathExtension.lowercased()),
                let duration = videoDurationSeconds(at: url), duration > 0 {
                 let original = fileSize(at: url)
+                let exportLow = MediaUploadDebugSettings.estimatedVideoBytesForExportPreset(
+                    at: url,
+                    profile: debug.low,
+                    durationSeconds: duration,
+                    originalSize: original)
                 let exportMedium = MediaUploadDebugSettings.estimatedVideoBytesForExportPreset(
                     at: url,
                     profile: debug.medium,
@@ -658,15 +674,21 @@ import UniformTypeIdentifiers
                     profile: debug.high,
                     durationSeconds: duration,
                     originalSize: original)
-                counts.medium = max(12_288, min(exportMedium, counts.low, original > 0 ? original : exportMedium))
-                counts.high = max(12_288, min(exportHigh, counts.medium, original > 0 ? original : exportHigh))
+                let cap = original > 0 ? original : max(exportLow, max(exportMedium, exportHigh))
+                // Monotonic: Low ≥ Medium ≥ High (preset guests are not always ordered).
+                counts.low = max(12_288, min(exportLow, cap))
+                counts.medium = max(12_288, min(exportMedium, counts.low))
+                counts.high = max(12_288, min(exportHigh, counts.medium))
             }
             // Match Send: skip items that would not shrink at that level → count original size.
-            let lowBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .low)
+            let lowBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(
+                at: url, level: .low, forceExportSession: multiVideoUsesExportSession)
                 ? counts.low : counts.none
-            let mediumBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .medium)
+            let mediumBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(
+                at: url, level: .medium, forceExportSession: multiVideoUsesExportSession)
                 ? counts.medium : counts.none
-            let highBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .high)
+            let highBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(
+                at: url, level: .high, forceExportSession: multiVideoUsesExportSession)
                 ? counts.high : counts.none
 
             let itemLow = min(lowBytes, counts.none)

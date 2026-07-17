@@ -76,6 +76,14 @@ NSString *const kShareConfirmationTableCellNibName = @"ShareConfirmationCollecti
     [self.placeholderTextView setText:text];
 }
 
+- (void)hidePlaceholderChrome
+{
+    self.placeholderImageView.image = nil;
+    self.placeholderTextView.text = @"";
+    self.placeholderImageView.hidden = YES;
+    self.placeholderTextView.hidden = YES;
+}
+
 - (void)setShowsVideoIndicator:(BOOL)showsVideoIndicator
 {
     [self setupVideoIndicatorIfNeeded];

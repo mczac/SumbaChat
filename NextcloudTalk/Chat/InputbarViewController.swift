@@ -202,7 +202,7 @@ import UIKit
                 // Lift off pure black (systemGray4 ≈ #3A3A3C)
                 return .systemGray4
             }
-            // Distinct from white / systemBackground (systemGray5 ≈ #E5E5EA)
+            // Distinct from white / systemBack ground (systemGray5 ≈ #E5E5EA)
             return .systemGray5
         }
     }

@@ -234,6 +234,13 @@ class NCRoomsManager: NSObject, CallViewControllerDelegate {
             if let error {
                 NCLog.log("Could not update room. Error: \(error.localizedDescription)")
 
+                // Room removed server-side (e.g. Sumba Chat Ops) — purge local Realm so iPhone
+                // does not keep a ghost conversation until the next full rooms sync.
+                if error.responseStatusCode == 404 {
+                    self.purgeLocalRoom(token: token, accountId: account.accountId)
+                    self.updateRooms(updatingUserStatus: false, onlyLastModified: false)
+                }
+
                 NotificationCenter.default.post(name: .NCRoomsManagerDidUpdateRoom, object: self, userInfo: ["error": error])
                 completion?([:], error)
 
@@ -262,6 +269,39 @@ class NCRoomsManager: NSObject, CallViewControllerDelegate {
             NotificationCenter.default.post(name: .NCRoomsManagerDidUpdateRoom, object: self, userInfo: userDict)
             completion?(roomDict, error)
         }
+    }
+
+    /// Remove a room and its cached chat data from Realm (no server call).
+    public func purgeLocalRoom(token: String, accountId: String) {
+        guard !token.isEmpty, !accountId.isEmpty else { return }
+
+        let realm = RLMRealm.default()
+        try? realm.transaction {
+            let roomQuery = NSPredicate(format: "accountId = %@ AND token = %@", accountId, token)
+            let managedRooms = NCRoom.objects(with: roomQuery)
+
+            let messagesAndBlocksQuery = NSPredicate(format: "accountId = %@ AND token = %@", accountId, token)
+            realm.deleteObjects(NCChatMessage.objects(with: messagesAndBlocksQuery))
+            realm.deleteObjects(NCChatBlock.objects(with: messagesAndBlocksQuery))
+
+            let threadsQuery = NSPredicate(format: "accountId = %@ AND roomToken = %@", accountId, token)
+            realm.deleteObjects(NCThread.objects(with: threadsQuery))
+
+            for case let managedRoom as NCRoom in managedRooms where managedRoom.isFederated {
+                let federatedCapabilities = NSPredicate(
+                    format: "accountId = %@ AND remoteServer = %@ AND roomToken = %@",
+                    accountId,
+                    managedRoom.remoteServer,
+                    managedRoom.token
+                )
+                realm.deleteObjects(FederatedCapabilities.objects(with: federatedCapabilities))
+            }
+
+            realm.deleteObjects(managedRooms)
+        }
+
+        self.activeRooms.removeValue(forKey: token)
+        NCLog.log("Purged local room cache for token=\(token) accountId=\(accountId)")
     }
 
     @discardableResult
@@ -502,7 +542,13 @@ class NCRoomsManager: NSObject, CallViewControllerDelegate {
         } else {
             // TODO: Show spinner
             NCAPIController.sharedInstance().getRoom(forAccount: activeAccount, withToken: token) { roomDict, error in
-                guard error == nil else { return }
+                if let error {
+                    if error.responseStatusCode == 404 {
+                        self.purgeLocalRoom(token: token, accountId: activeAccount.accountId)
+                        self.updateRooms(updatingUserStatus: false, onlyLastModified: false)
+                    }
+                    return
+                }
 
                 if let room = NCRoom(dictionary: roomDict, andAccountId: activeAccount.accountId) {
                     self.startChat(inRoom: room)

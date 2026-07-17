@@ -1089,7 +1089,8 @@ import Toast
     func presentPhotoLibrary() {
         DispatchQueue.main.async {
             var pickerConfig = PHPickerConfiguration()
-            pickerConfig.selectionLimit = 20
+            // Cap matches Element X — keeps batch compress/upload off the jetsam cliff.
+            pickerConfig.selectionLimit = 10
             pickerConfig.filter = PHPickerFilter.any(of: [.images, .videos])
 
             self.photoPicker = PHPickerViewController(configuration: pickerConfig)

@@ -406,16 +406,23 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
     func presentUploadMediaModeSelector() {
         let currentMode = MediaUploadMode(rawValue: Int(NCUserDefaults.mediaUploadMode())) ?? .automatic
-        let modes: [(MediaUploadMode, String)] = [
-            (.noCompression, NSLocalizedString("None", comment: "No media compression")),
-            (.automatic, NSLocalizedString("Automatic", comment: "Automatic media compression")),
-            (.chooseOnUpload, NSLocalizedString("Manual", comment: "Choose compression level when uploading"))
+        let modes: [(MediaUploadMode, String, String)] = [
+            (.noCompression,
+             NSLocalizedString("None", comment: "No media compression"),
+             NSLocalizedString("Upload originals without compressing", comment: "Subtitle for None media compression mode")),
+            (.automatic,
+             NSLocalizedString("Automatic", comment: "Automatic media compression"),
+             NSLocalizedString("Picks Low, Medium, or High to stay under size caps", comment: "Subtitle for Automatic media compression mode")),
+            (.chooseOnUpload,
+             NSLocalizedString("Manual", comment: "Choose compression level when uploading"),
+             NSLocalizedString("Choose None, Low, Medium, or High on each send", comment: "Subtitle for Manual media compression mode"))
         ]
 
-        let options: [DetailedOption] = modes.map { mode, title in
+        let options: [DetailedOption] = modes.map { mode, title, subtitle in
             let option = DetailedOption()
             option.identifier = "\(mode.rawValue)"
             option.title = title
+            option.subtitle = subtitle
             option.selected = mode == currentMode
             return option
         }
@@ -424,6 +431,10 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
                                                                         forSenderIdentifier: mediaUploadModeSenderId,
                                                                         andStyle: .insetGrouped) else { return }
         selector.title = NSLocalizedString("Media Compression", comment: "")
+        selector.footerText = NSLocalizedString(
+            "Manual shows estimated sizes before send. Estimates are approximate. Two or more videos use Apple export presets for stability.",
+            comment: "Footer on Media Compression mode picker"
+        )
         selector.delegate = self
         navigationController?.pushViewController(selector, animated: true)
     }

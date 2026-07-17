@@ -66,6 +66,8 @@ import MBProgressHUD
     }
     /// Skip QL / large image decode while compressing or uploading (jetsam mitigation).
     private var suppressMediaPreviews = false
+    /// Object identities currently shown in the pager — used to insert/delete pages without reload flash.
+    private var pagerItemIdentities: [ObjectIdentifier] = []
     /// Set when the user hits Cancel during prepare/upload — prepare completion must not start PUT.
     private var mediaFlowCancelled = false
     /// In-flight NextcloudKit upload tasks so Cancel can stop the network side too.
@@ -209,7 +211,7 @@ import MBProgressHUD
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.distribution = .fillEqually
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         for level in [MediaUploadCompressionLevel.none, .low, .medium, .high] {
@@ -217,9 +219,10 @@ import MBProgressHUD
             button.tag = level.rawValue
             button.titleLabel?.numberOfLines = 2
             button.titleLabel?.textAlignment = .center
-            button.titleLabel?.lineBreakMode = .byWordWrapping
-            button.layer.cornerRadius = 10
+            button.titleLabel?.lineBreakMode = .byClipping
+            button.layer.cornerRadius = 8
             button.layer.borderWidth = 1
+            button.contentEdgeInsets = UIEdgeInsets(top: 5, left: 2, bottom: 5, right: 2)
             button.addTarget(self, action: #selector(compressionOptionPressed(_:)), for: .touchUpInside)
             stack.addArrangedSubview(button)
         }
@@ -230,10 +233,10 @@ import MBProgressHUD
     private lazy var compressionTitleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.text = NSLocalizedString("Compression & Est. Size", comment: "Share sheet section header for compression chips and size estimates").uppercased(with: .current)
-        let baseSize = UIFont.preferredFont(forTextStyle: .footnote).pointSize
-        label.font = .systemFont(ofSize: baseSize + 1, weight: .semibold)
-        label.textColor = .label
+        // Sentence case — chip sizes already communicate “est. size”; all-caps shouted redundancy.
+        label.text = NSLocalizedString("Compression", comment: "Share sheet section header above compression quality chips")
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .secondaryLabel
         return label
     }()
 
@@ -241,7 +244,7 @@ import MBProgressHUD
         let stack = UIStackView(arrangedSubviews: [self.compressionTitleLabel, self.compressionOptionsView])
         stack.axis = .vertical
         stack.alignment = .fill
-        stack.spacing = 6
+        stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.isHidden = true
         return stack
@@ -651,7 +654,7 @@ import MBProgressHUD
         self.textView.resignFirstResponder()
         // Keep pager + current previews on screen. Block new QL/decode only (jetsam was from regen, not static thumbs).
         self.shareCollectionView.isUserInteractionEnabled = false
-        self.showProgressHUD(phase: .preparing, progress: 0, overMedia: true)
+        self.showProgressHUD(phase: .preparing(count: mediaCount), progress: 0, overMedia: true)
         NCLog.log("Media upload: preparing \(mediaCount) item(s) for compression")
 
         let chosenLevel = self.chosenCompressionLevel
@@ -760,7 +763,7 @@ import MBProgressHUD
         let showQuality = self.mediaUploadMode == .chooseOnUpload && self.shareType == .item
 
         self.compressionSectionView.isHidden = !showQuality
-        self.compressionSectionHeightConstraint?.constant = showQuality ? 90 : 0
+        self.compressionSectionHeightConstraint?.constant = showQuality ? 78 : 0
 
         guard showQuality else {
             self.view.layoutIfNeeded()
@@ -807,12 +810,14 @@ import MBProgressHUD
                                             enabled: Set<MediaUploadCompressionLevel>,
                                             sizesReady: Bool) {
         let elementColor = NCAppBranding.elementColor()
-        let levelFont = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold)
-        let sizeFont = UIFont.preferredFont(forTextStyle: .caption2)
+        let captionPoint = UIFont.preferredFont(forTextStyle: .caption2).pointSize
+        let levelFont = UIFont.systemFont(ofSize: captionPoint, weight: .semibold)
+        let sizeFont = UIFont.systemFont(ofSize: max(10, captionPoint - 1), weight: .regular)
 
         for case let button as UIButton in self.compressionOptionsView.arrangedSubviews {
             guard let level = MediaUploadCompressionLevel(rawValue: button.tag) else { continue }
-            let levelTitle = self.title(for: level).uppercased(with: .current)
+            // Title case saves horizontal space vs ALL CAPS on a 4-up row.
+            let levelTitle = self.title(for: level)
             let sizeTitle: String
             let isEnabled: Bool
             if sizesReady {
@@ -858,7 +863,9 @@ import MBProgressHUD
     private static let centeredChipParagraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
-        style.lineBreakMode = .byWordWrapping
+        style.lineBreakMode = .byClipping
+        style.lineSpacing = 0
+        style.paragraphSpacing = 0
         return style
     }()
 
@@ -871,7 +878,7 @@ import MBProgressHUD
         /// Provider / iCloud / local staging copy (before preview is ready).
         case loadingMedia
         /// Send-path compression.
-        case preparing
+        case preparing(count: Int)
         case uploading(count: Int)
 
         var title: String {
@@ -881,17 +888,18 @@ import MBProgressHUD
             case .preparing:
                 return NSLocalizedString("Preparing…", comment: "Shown while media is compressed before upload")
             case .uploading:
-                return NSLocalizedString("Uploading", comment: "Upload progress title; details show file count")
+                return NSLocalizedString("Uploading…", comment: "Upload progress title; details show file count")
             }
         }
 
         var details: String {
             switch self {
-            case .loadingMedia, .preparing:
-                // Keep a second line so spinner/ring + labels stay vertically centered
+            case .loadingMedia:
+                // Keep a second line so spinner + labels stay vertically centered
                 // across Loading / Preparing / Uploading (same bezel height).
                 return "\u{00a0}"
-            case .uploading(let count):
+            case .preparing(let count), .uploading(let count):
+                // Identical subtitle for Preparing and Uploading — no layout shift on handoff.
                 if count == 1 {
                     return NSLocalizedString("1 media file", comment: "Upload progress detail for a single file")
                 }
@@ -982,8 +990,10 @@ import MBProgressHUD
 
         self.styleMediaProgressHUD(hud)
         hud.mode = .customView
+        // Keep title/details lengths stable so Preparing → Uploading does not reflow the card.
         hud.label.text = phase.title
         hud.detailsLabel.text = phase.details
+        hud.detailsLabel.isHidden = false
 
         if indeterminate {
             _ = self.loadingSpinnerView(for: hud)
@@ -1481,22 +1491,33 @@ import MBProgressHUD
 
         let extensionName = item.fileURL?.pathExtension.lowercased() ?? ""
         let isVideo = MediaUploadPreprocessor.isVideo(fileExtension: extensionName)
+        let isImage = NCUtils.isImage(fileExtension: extensionName)
         cell.setShowsVideoIndicator(isVideo)
 
         // During Send, keep whatever preview is already on screen — do not clear or re-decode.
         if self.suppressMediaPreviews || self.isPreparingForUpload || self.isUploadingMedia {
             if cell.previewView.image == nil {
-                cell.setPlaceHolderImage(item.placeholderImage)
-                cell.setPlaceHolderText(item.fileName)
+                // Avoid the XIB’s top-left 120×120 file icon flash on media pages.
+                if isImage || isVideo {
+                    cell.hidePlaceholderChrome()
+                } else {
+                    cell.setPlaceHolderImage(item.placeholderImage)
+                    cell.setPlaceHolderText(item.fileName)
+                }
             }
             return cell
         }
 
-        // Setting placeholder here in case we can't generate any other preview
-        cell.setPlaceHolderImage(item.placeholderImage)
-        cell.setPlaceHolderText(item.fileName)
+        if isImage || isVideo {
+            // Placeholder sits at a fixed 120×120 top-left in the XIB — showing it before
+            // the full-bleed preview lands looks like a corner blink, then a jump.
+            cell.hidePlaceholderChrome()
+        } else {
+            cell.setPlaceHolderImage(item.placeholderImage)
+            cell.setPlaceHolderText(item.fileName)
+        }
 
-        if let fileURL = item.fileURL, NCUtils.isImage(fileExtension: fileURL.pathExtension) {
+        if let fileURL = item.fileURL, isImage {
             // Keep preview decode modest — multi-attachment sheets already hold several bitmaps.
             let maxDimension: CGFloat = 1024
             if let image = MediaUploadPreprocessor.previewImage(at: fileURL, maxDimension: maxDimension) {
@@ -1700,6 +1721,7 @@ import MBProgressHUD
                     return
                 }
                 NCLog.log("ShareConfirmation: items empty — cancelling share sheet")
+                self.pagerItemIdentities = []
                 if let extensionContext = self.extensionContext {
                     let error = NSError(domain: NSCocoaErrorDomain, code: 0)
                     extensionContext.cancelRequest(withError: error)
@@ -1716,31 +1738,12 @@ import MBProgressHUD
                     return
                 }
 
-                let newCount = shareItemController.shareItems.count
-                let previousItemCount = self.shareCollectionView.numberOfItems(inSection: 0)
-                // Stay on the page the user is viewing (default first). Never jump to the last item
-                // as files stage — animated pager jumps looked like media “flying in”.
-                let preservedPage = previousItemCount == 0 ? 0 : self.currentPageIndex()
-                let targetPage = min(max(preservedPage, 0), newCount - 1)
-
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                UIView.performWithoutAnimation {
-                    self.shareCollectionView.reloadData()
-                    self.shareCollectionView.collectionViewLayout.invalidateLayout()
-                    self.shareCollectionView.layoutIfNeeded()
-                    self.pageControl.numberOfPages = newCount
-                    let width = self.shareCollectionView.bounds.width
-                    if width > 0.5, newCount > 0 {
-                        self.shareCollectionView.setContentOffset(
-                            CGPoint(x: CGFloat(targetPage) * width, y: 0),
-                            animated: false
-                        )
-                    }
-                    self.pageControl.currentPage = targetPage
-                    self.updateToolbarForCurrentItem()
-                }
-                CATransaction.commit()
+                // Stay on the page the user is viewing. Incremental insert/delete avoids the
+                // brief empty-icon flash from reloadData as each file stages.
+                let preservedPage = self.shareCollectionView.numberOfItems(inSection: 0) == 0
+                    ? 0
+                    : self.currentPageIndex()
+                self.syncShareCollectionPager(preservingPage: preservedPage)
 
                 self.updateCompressionOptionsUI()
 
@@ -1751,6 +1754,139 @@ import MBProgressHUD
 
             self.updateStagingProgressHUD()
         }
+    }
+
+    /// Diffs `shareItems` against the pager and inserts/deletes pages instead of `reloadData`.
+    private func syncShareCollectionPager(preservingPage preservedPage: Int) {
+        let items = self.shareItemController.shareItems
+        let newIds = items.map { ObjectIdentifier($0) }
+        let oldIds = self.pagerItemIdentities
+        let collectionCount = self.shareCollectionView.numberOfItems(inSection: 0)
+
+        // Keep snapshot aligned if the collection was emptied elsewhere.
+        if items.isEmpty {
+            if collectionCount > 0 {
+                UIView.performWithoutAnimation {
+                    self.shareCollectionView.reloadData()
+                    self.shareCollectionView.layoutIfNeeded()
+                }
+            }
+            self.pagerItemIdentities = []
+            self.pageControl.numberOfPages = 0
+            return
+        }
+
+        let applyPageAndChrome = {
+            let newCount = items.count
+            self.pageControl.numberOfPages = newCount
+            let targetPage = min(max(preservedPage, 0), newCount - 1)
+            let width = self.shareCollectionView.bounds.width
+            if width > 0.5 {
+                self.shareCollectionView.setContentOffset(
+                    CGPoint(x: CGFloat(targetPage) * width, y: 0),
+                    animated: false
+                )
+            }
+            self.pageControl.currentPage = targetPage
+            self.updateToolbarForCurrentItem()
+            self.pagerItemIdentities = newIds
+        }
+
+        // Pure append (staging): insert only the new trailing pages.
+        let isPureAppend = collectionCount == oldIds.count
+            && newIds.count > oldIds.count
+            && Array(newIds.prefix(oldIds.count)) == oldIds
+
+        if isPureAppend {
+            let indexPaths = (oldIds.count..<newIds.count).map { IndexPath(item: $0, section: 0) }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            UIView.performWithoutAnimation {
+                self.shareCollectionView.performBatchUpdates({
+                    self.shareCollectionView.insertItems(at: indexPaths)
+                }, completion: nil)
+                self.shareCollectionView.layoutIfNeeded()
+                applyPageAndChrome()
+            }
+            CATransaction.commit()
+            return
+        }
+
+        // Removals / reorder / identity mismatch: delete missing, then insert new if needed.
+        if collectionCount == oldIds.count, newIds != oldIds {
+            let newIdSet = Set(newIds)
+            let deletePaths = oldIds.enumerated().compactMap { index, id -> IndexPath? in
+                newIdSet.contains(id) ? nil : IndexPath(item: index, section: 0)
+            }
+            // After deletes, remaining old ids in order:
+            let remainingOld = oldIds.filter { newIdSet.contains($0) }
+            let insertPaths: [IndexPath]
+            if remainingOld == Array(newIds.prefix(remainingOld.count)) {
+                insertPaths = (remainingOld.count..<newIds.count).map { IndexPath(item: $0, section: 0) }
+            } else {
+                // Structural mismatch — fall through to full reload.
+                self.reloadShareCollectionPager(preservingPage: preservedPage, newIds: newIds)
+                return
+            }
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            UIView.performWithoutAnimation {
+                self.shareCollectionView.performBatchUpdates({
+                    if !deletePaths.isEmpty {
+                        self.shareCollectionView.deleteItems(at: deletePaths)
+                    }
+                    if !insertPaths.isEmpty {
+                        self.shareCollectionView.insertItems(at: insertPaths)
+                    }
+                }, completion: nil)
+                self.shareCollectionView.layoutIfNeeded()
+                applyPageAndChrome()
+            }
+            CATransaction.commit()
+            return
+        }
+
+        // Same identities (e.g. crop/update) or first paint / desync: targeted reload.
+        if newIds == oldIds, collectionCount == newIds.count {
+            let visible = self.shareCollectionView.indexPathsForVisibleItems
+            if !visible.isEmpty {
+                UIView.performWithoutAnimation {
+                    self.shareCollectionView.reloadItems(at: visible)
+                    self.shareCollectionView.layoutIfNeeded()
+                    applyPageAndChrome()
+                }
+            } else {
+                applyPageAndChrome()
+            }
+            return
+        }
+
+        self.reloadShareCollectionPager(preservingPage: preservedPage, newIds: newIds)
+    }
+
+    private func reloadShareCollectionPager(preservingPage preservedPage: Int, newIds: [ObjectIdentifier]) {
+        let newCount = newIds.count
+        let targetPage = min(max(preservedPage, 0), max(newCount - 1, 0))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        UIView.performWithoutAnimation {
+            self.shareCollectionView.reloadData()
+            self.shareCollectionView.collectionViewLayout.invalidateLayout()
+            self.shareCollectionView.layoutIfNeeded()
+            self.pageControl.numberOfPages = newCount
+            let width = self.shareCollectionView.bounds.width
+            if width > 0.5, newCount > 0 {
+                self.shareCollectionView.setContentOffset(
+                    CGPoint(x: CGFloat(targetPage) * width, y: 0),
+                    animated: false
+                )
+            }
+            self.pageControl.currentPage = targetPage
+            self.updateToolbarForCurrentItem()
+        }
+        CATransaction.commit()
+        self.pagerItemIdentities = newIds
     }
 
     public func shareItemControllerPreparingItemsChanged(_ shareItemController: ShareItemController) {

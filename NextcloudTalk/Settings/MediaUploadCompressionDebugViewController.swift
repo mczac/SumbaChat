@@ -158,17 +158,14 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
     override func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
         let section = Section(rawValue: section)!
         if isPhotoSection(section) {
+            // Tight gap before the paired video card (no footer text on photo).
             return 8
-        }
-        if isVideoSection(section) {
-            return .leastNormalMagnitude
         }
         return UITableView.automaticDimension
     }
 
     override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
-        let section = Section(rawValue: section)!
-        if isPhotoSection(section) || isVideoSection(section) {
+        if isPhotoSection(Section(rawValue: section)!) {
             return UIView()
         }
         return nil
@@ -178,15 +175,35 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         switch Section(rawValue: section)! {
         case .engine:
             return NSLocalizedString(
-                "Presets use Apple export presets. Bitrate uses AVAssetWriter with rate, size, and FPS controls.",
-                comment: ""
+                "Presets use Apple export presets. Bitrate uses AVAssetWriter (rate, max size, edge, FPS). Sending two or more videos always uses Presets for stability, even if Bitrate is selected.",
+                comment: "Footer under video engine picker in Media Compression Settings"
             )
         case .caps:
             return NSLocalizedString(
-                "These limits apply only when Automatic compression is selected. Per-file and package totals are in megabytes; package total always wins.",
-                comment: ""
+                "Used only when Media Compression is Automatic. Automatic picks Low, Medium, or High so each file stays under the per-file cap and the whole send stays under the package cap (package wins if both apply).",
+                comment: "Footer under Automatic size caps in Media Compression Settings"
             )
-        default:
+        case .lowVideo:
+            return NSLocalizedString(
+                "Top card: photos (JPEG quality and longest edge). Bottom card: video for this level. Low is the mildest shrink — larger files, better quality.",
+                comment: "Footer under Low compression photo+video pair"
+            )
+        case .mediumVideo:
+            return NSLocalizedString(
+                "Medium is the balanced default for Manual chips and a common Automatic pick.",
+                comment: "Footer under Medium compression photo+video pair"
+            )
+        case .highVideo:
+            return NSLocalizedString(
+                "High is the most aggressive — smallest files, more quality loss. Chip size estimates are approximate.",
+                comment: "Footer under High compression photo+video pair"
+            )
+        case .actions:
+            return NSLocalizedString(
+                "Restores Low, Medium, High, video engine, and Automatic caps to built-in defaults.",
+                comment: "Footer under Reset to defaults in Media Compression Settings"
+            )
+        case .lowPhoto, .mediumPhoto, .highPhoto:
             return nil
         }
     }
@@ -304,7 +321,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                 pushMegabyteChoices(
                     title: NSLocalizedString("Per file max size", comment: ""),
                     currentMB: Double(settings.perFileMaxBytes) / 1_048_576,
-                    values: [10, 20, 25, 30, 40, 50, 75, 100, 150, 200, 250, 500]
+                    values: [10, 20, 25, 30, 40, 50, 75, 100, 150, 200, 250, 500],
+                    footer: NSLocalizedString(
+                        "Automatic tries to keep each compressed file under this size.",
+                        comment: "Footer under per-file Automatic cap picker"
+                    )
                 ) { mb in
                     self.settings.perFileMaxBytes = Int64(mb * 1_048_576)
                     self.persistAndReload()
@@ -313,7 +334,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                 pushMegabyteChoices(
                     title: NSLocalizedString("Package max size", comment: ""),
                     currentMB: Double(settings.packageMaxBytes) / 1_048_576,
-                    values: [25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000]
+                    values: [25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000],
+                    footer: NSLocalizedString(
+                        "Automatic tries to keep the whole send under this size. Wins over the per-file cap when both apply.",
+                        comment: "Footer under package Automatic cap picker"
+                    )
                 ) { mb in
                     self.settings.packageMaxBytes = Int64(mb * 1_048_576)
                     self.persistAndReload()
@@ -339,7 +364,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         case .jpegQuality:
             pushIntChoices(title: "JPEG quality", current: profile.imageJPEGQuality,
                            values: [40, 50, 60, 70, 75, 80, 85, 90, 95, 100],
-                           unit: nil) { value in
+                           unit: nil,
+                           footer: NSLocalizedString(
+                            "1–100 for re-encoded JPEG. Lower values shrink more and look softer.",
+                            comment: "Footer under JPEG quality picker"
+                           )) { value in
                 var updated = self.settings[keyPath: keyPath]
                 updated.imageJPEGQuality = min(100, max(1, value))
                 self.settings[keyPath: keyPath] = updated
@@ -348,7 +377,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         case .imageMaxEdge:
             pushIntChoices(title: "Image max edge", current: profile.imageMaxDimension,
                            values: [640, 960, 1280, 1600, 1920, 2560, 3840, 4096, 8192],
-                           unit: "px") { value in
+                           unit: "px",
+                           footer: NSLocalizedString(
+                            "Longest side after resize. Images already smaller than this are not upscaled.",
+                            comment: "Footer under image max edge picker"
+                           )) { value in
                 var updated = self.settings[keyPath: keyPath]
                 updated.imageMaxDimension = min(8192, max(320, value))
                 self.settings[keyPath: keyPath] = updated
@@ -365,7 +398,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             case .videoRate:
                 pushDoubleChoices(title: "Video rate", current: profile.videoRateMBps,
                                   values: [0.05, 0.1, 0.15, 0.25, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0],
-                                  unit: "MB/s", format: "%.3f") { value in
+                                  unit: "MB/s", format: "%.3f",
+                                  footer: NSLocalizedString(
+                                    "Target video bitrate for AVAssetWriter. Lower is smaller and softer.",
+                                    comment: "Footer under video rate picker"
+                                  )) { value in
                     var updated = self.settings[keyPath: keyPath]
                     updated.videoRateMBps = max(0.01, value)
                     self.settings[keyPath: keyPath] = updated
@@ -374,7 +411,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             case .videoMaxMB:
                 pushMegabyteChoices(title: "Video max size",
                                     currentMB: Double(profile.videoMaxBytes) / 1_048_576,
-                                    values: [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200]) { mb in
+                                    values: [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200],
+                                    footer: NSLocalizedString(
+                                        "Soft ceiling for Writer output. Rate is reduced on long clips so size stays near this cap.",
+                                        comment: "Footer under video max size picker"
+                                    )) { mb in
                     var updated = self.settings[keyPath: keyPath]
                     updated.videoMaxBytes = Int64(max(1, mb) * 1_048_576)
                     self.settings[keyPath: keyPath] = updated
@@ -383,7 +424,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             case .videoMaxEdge:
                 pushIntChoices(title: "Video max edge", current: profile.videoMaxEdge,
                                values: [480, 640, 720, 960, 1080, 1280, 1440, 1920, 2560, 3840],
-                               unit: "px") { value in
+                               unit: "px",
+                               footer: NSLocalizedString(
+                                "Longest side for Writer output. Multi-video batches may apply a lower temporary cap.",
+                                comment: "Footer under video max edge picker"
+                               )) { value in
                     var updated = self.settings[keyPath: keyPath]
                     updated.videoMaxEdge = min(3840, max(320, value))
                     self.settings[keyPath: keyPath] = updated
@@ -392,7 +437,11 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             case .videoFPS:
                 pushDoubleChoices(title: "Video FPS", current: profile.videoFPS,
                                   values: [15, 20, 24, 25, 30, 48, 50, 60],
-                                  unit: "fps", format: "%.0f") { value in
+                                  unit: "fps", format: "%.0f",
+                                  footer: NSLocalizedString(
+                                    "Frame-rate cap for Writer. Source below this is left as-is.",
+                                    comment: "Footer under video FPS picker"
+                                  )) { value in
                     var updated = self.settings[keyPath: keyPath]
                     updated.videoFPS = min(60, max(1, value))
                     self.settings[keyPath: keyPath] = updated
@@ -406,7 +455,7 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
 
     // MARK: - Pushed choice sheets
 
-    private func pushIntChoices(title: String, current: Int, values: [Int], unit: String?, apply: @escaping (Int) -> Void) {
+    private func pushIntChoices(title: String, current: Int, values: [Int], unit: String?, footer: String? = nil, apply: @escaping (Int) -> Void) {
         var list = values
         if !list.contains(current) {
             list.append(current)
@@ -416,13 +465,13 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             let label = unit.map { "\(value) \($0)" } ?? "\(value)"
             return ("\(value)", label, nil)
         }
-        pushChoices(title: title, selectedId: "\(current)", choices: choices) { id in
+        pushChoices(title: title, selectedId: "\(current)", choices: choices, footer: footer) { id in
             guard let value = Int(id) else { return }
             apply(value)
         }
     }
 
-    private func pushDoubleChoices(title: String, current: Double, values: [Double], unit: String, format: String, apply: @escaping (Double) -> Void) {
+    private func pushDoubleChoices(title: String, current: Double, values: [Double], unit: String, format: String, footer: String? = nil, apply: @escaping (Double) -> Void) {
         var list = values
         if !list.contains(where: { abs($0 - current) < 0.0001 }) {
             list.append(current)
@@ -433,19 +482,20 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             return (id, "\(id) \(unit)", nil)
         }
         let selectedId = String(format: format, current)
-        pushChoices(title: title, selectedId: selectedId, choices: choices) { id in
+        pushChoices(title: title, selectedId: selectedId, choices: choices, footer: footer) { id in
             guard let value = Double(id) else { return }
             apply(value)
         }
     }
 
-    private func pushMegabyteChoices(title: String, currentMB: Double, values: [Double], apply: @escaping (Double) -> Void) {
-        pushDoubleChoices(title: title, current: currentMB, values: values, unit: "MB", format: "%.1f", apply: apply)
+    private func pushMegabyteChoices(title: String, currentMB: Double, values: [Double], footer: String? = nil, apply: @escaping (Double) -> Void) {
+        pushDoubleChoices(title: title, current: currentMB, values: values, unit: "MB", format: "%.1f", footer: footer, apply: apply)
     }
 
     private func pushChoices(title: String,
                              selectedId: String,
                              choices: [(id: String, title: String, subtitle: String?)],
+                             footer: String? = nil,
                              apply: @escaping (String) -> Void) {
         pendingChoiceHandler = apply
         pendingPresetProfile = nil
@@ -461,6 +511,7 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                                                                         forSenderIdentifier: choiceSenderId,
                                                                         andStyle: .insetGrouped) else { return }
         selector.title = title
+        selector.footerText = footer
         selector.delegate = self
         navigationController?.pushViewController(selector, animated: true)
     }
@@ -483,8 +534,8 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                                                                         andStyle: .insetGrouped) else { return }
         selector.title = NSLocalizedString("Video preset", comment: "")
         selector.footerText = NSLocalizedString(
-            "Shows the Apple AVAssetExportPreset constant. Low / Medium / High compression are aggressiveness levels — not the same as LowQuality / MediumQuality / HighestQuality.",
-            comment: ""
+            "Apple export preset for this compression level when using Presets, or when sending two or more videos. Low / Medium / High here are aggressiveness levels — not the same names as Apple’s LowQuality / MediumQuality / HighestQuality presets.",
+            comment: "Footer under video preset picker"
         )
         selector.delegate = self
         navigationController?.pushViewController(selector, animated: true)

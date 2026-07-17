@@ -803,10 +803,23 @@ class RoomsTableViewController: UITableViewController, CCCertificateDelegate, UI
         return filterImage(filter)
     }
 
-    private func filterPlaceholderText(_ filter: RoomsFilter) -> String? {
+    private func filterPlaceholderTitle(_ filter: RoomsFilter) -> String {
         switch filter {
         case .all:
-            return NSLocalizedString("You are not part of any conversation. Press + to start a new one.", comment: "")
+            return NSLocalizedString("No conversations yet", comment: "Rooms list empty-state title")
+        case .unread:
+            return NSLocalizedString("All caught up", comment: "Rooms list empty-state title when Unread filter has no matches")
+        case .mentioned:
+            return NSLocalizedString("No mentions", comment: "Rooms list empty-state title when Mentions filter has no matches")
+        case .event:
+            return NSLocalizedString("No meetings", comment: "Rooms list empty-state title when Meetings filter has no matches")
+        }
+    }
+
+    private func filterPlaceholderSubtitle(_ filter: RoomsFilter) -> String {
+        switch filter {
+        case .all:
+            return NSLocalizedString("Tap + to start a new one.", comment: "Rooms list empty-state subtitle pointing at the new-conversation button")
         case .unread:
             return NSLocalizedString("You have no unread messages.", comment: "")
         case .mentioned:
@@ -965,9 +978,25 @@ class RoomsTableViewController: UITableViewController, CCCertificateDelegate, UI
         roomsBackgroundView.loadingView.stopAnimating()
         roomsBackgroundView.loadingView.isHidden = true
 
-        roomsBackgroundView.setImage(filterPlaceholderImage(activeFilter))
-        roomsBackgroundView.placeholderTextView.text = filterPlaceholderText(activeFilter)
-        roomsBackgroundView.placeholderView.isHidden = !rooms.isEmpty
+        let showEmpty = rooms.isEmpty
+        let wasHidden = roomsBackgroundView.placeholderView.isHidden
+
+        roomsBackgroundView.setImage(filterPlaceholderImage(activeFilter), accented: activeFilter == .all)
+        roomsBackgroundView.setTitle(filterPlaceholderTitle(activeFilter), subtitle: filterPlaceholderSubtitle(activeFilter))
+        roomsBackgroundView.placeholderView.isHidden = !showEmpty
+
+        // Soft presence when the empty state first appears (not on every filter churn while already empty).
+        if showEmpty && wasHidden {
+            roomsBackgroundView.placeholderView.alpha = 0
+            roomsBackgroundView.placeholderView.transform = CGAffineTransform(translationX: 0, y: 8)
+            UIView.animate(withDuration: 0.35, delay: 0.05, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.roomsBackgroundView.placeholderView.alpha = 1
+                self.roomsBackgroundView.placeholderView.transform = .identity
+            }
+        } else if showEmpty {
+            roomsBackgroundView.placeholderView.alpha = 1
+            roomsBackgroundView.placeholderView.transform = .identity
+        }
     }
 
     private func adaptInterface(forAppState appState: AppState) {
