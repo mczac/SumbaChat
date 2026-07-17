@@ -729,7 +729,7 @@ import MBProgressHUD
             return
         }
 
-        // Per-item cheap estimates from Debug rates (video: rate×duration or preset Mbps; image: quality heuristic).
+        // Per-item: compress estimate if we would compress, else original (same as Send skip).
         let items = self.shareItemController.shareItems
         let urls = items.compactMap(\.fileURL)
         let totals = MediaUploadPreprocessor.cheapEstimatedByteCounts(forFileURLs: urls)

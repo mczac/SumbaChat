@@ -123,6 +123,6 @@ Unchanged (GIF skipped; pasted PNG data path unchanged).
 - **Manual chip gating:** None always enabled; Low/Medium/High if **any**
   image/video in the bag is likely ≥10% smaller. On Send, each item that would
   not shrink **skips** that level (as-is); encode still keeps original if not
-  smaller. Chip size labels remain optimistic totals.
+  smaller. Chip labels sum **per-item** compress-or-original the same way.
 - **Debug ExportSession presets:** picker/row shows guestimated Mbps
   (community figures, not Apple contracts).

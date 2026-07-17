@@ -554,16 +554,23 @@ import UniformTypeIdentifiers
         var high: Int64 = 0
         for url in fileURLs {
             let counts = cheapEstimatedByteCounts(at: url)
+            // Match Send: skip items that would not shrink at that level → count original size.
+            let lowBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .low)
+                ? counts.low : counts.none
+            let mediumBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .medium)
+                ? counts.medium : counts.none
+            let highBytes = MediaUploadDebugSettings.itemCompressionLikelyShrinks(at: url, level: .high)
+                ? counts.high : counts.none
+
+            var itemLow = min(lowBytes, counts.none)
+            var itemMedium = min(mediumBytes, itemLow)
+            var itemHigh = min(highBytes, itemMedium)
+
             none += counts.none
-            low += counts.low
-            medium += counts.medium
-            high += counts.high
+            low += itemLow
+            medium += itemMedium
+            high += itemHigh
         }
-        high = min(high, medium)
-        medium = min(medium, low)
-        low = min(low, none)
-        high = min(high, medium)
-        medium = min(medium, low)
         return LevelEstimates(none: none, low: low, medium: medium, high: high)
     }
 
