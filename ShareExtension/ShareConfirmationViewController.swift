@@ -751,7 +751,7 @@ import MBProgressHUD
             self.chosenCompressionLevel = .none
         }
 
-        NCLog.log("Media upload: Choose-on-upload chips for \(items.count) item(s) — none=\(totals.none) low=\(totals.low) medium=\(totals.medium) high=\(totals.high) enabled=\(enabled.map(\.rawValue).sorted())")
+        NCLog.log("Media upload: Choose-on-upload chips for \(items.count) item(s) — none=\(totals.none) low=\(totals.low) medium=\(totals.medium) high=\(totals.high) enabled=\(enabled.map(\.rawValue).sorted()) (see MediaUploadHeuristic lines for per-item rates/sizes)")
         self.applyCompressionChipTitles(estimates: estimates, enabled: enabled)
         self.view.layoutIfNeeded()
     }

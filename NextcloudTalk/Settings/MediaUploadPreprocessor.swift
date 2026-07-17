@@ -330,7 +330,15 @@ import UniformTypeIdentifiers
                 return false
             }
 
-            NCLog.log("MediaUploadPreprocessor: compressed image \(sourceURL.lastPathComponent) (\(fileSize(at: sourceURL)) → \(written) bytes)")
+            NCLog.log(String(format:
+                "MediaUploadPreprocessor: image ACTUAL %@ %lld (%.2f MB) → %lld (%.2f MB) q=%.2f maxEdge=%.0f",
+                sourceURL.lastPathComponent,
+                fileSize(at: sourceURL),
+                Double(fileSize(at: sourceURL)) / 1_048_576.0,
+                written,
+                Double(written) / 1_048_576.0,
+                settings.imageJPEGQuality,
+                settings.imageMaxDimension))
             return true
         } catch {
             NCLog.log("MediaUploadPreprocessor: failed to write compressed image: \(error.localizedDescription)")
@@ -467,7 +475,15 @@ import UniformTypeIdentifiers
                         return
                     }
 
-                    NCLog.log("MediaUploadPreprocessor: compressed video from \(sourceSize) to \(compressedSize) bytes")
+                    let duration = CMTimeGetSeconds(asset.duration)
+                    let srcMbps = duration > 0 ? MediaUploadDebugSettings.approximateSourceTotalMbps(fileBytes: sourceSize, durationSeconds: duration) : 0
+                    let outMbps = duration > 0 ? MediaUploadDebugSettings.approximateSourceTotalMbps(fileBytes: compressedSize, durationSeconds: duration) : 0
+                    NCLog.log(String(format:
+                        "MediaUploadPreprocessor: ExportSession ACTUAL %@ %lld (%.2f MB, %.3fMbps) → %lld (%.2f MB, %.3fMbps) preset=%@",
+                        sourceURL.lastPathComponent,
+                        sourceSize, Double(sourceSize) / 1_048_576.0, srcMbps,
+                        compressedSize, Double(compressedSize) / 1_048_576.0, outMbps,
+                        settings.videoPreset))
                     completion(true)
                 case .failed, .cancelled:
                     NCLog.log("MediaUploadPreprocessor: video export failed: \(exportSession.error?.localizedDescription ?? "unknown error")")

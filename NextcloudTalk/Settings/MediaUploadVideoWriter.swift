@@ -222,8 +222,17 @@ enum MediaUploadVideoWriter {
                             completion(false)
                             return
                         }
-                        progress?(1)
-                        NCLog.log("MediaUploadVideoWriter: \(sourceSize) → \(compressedSize) bytes (\(width)x\(height), \(videoBitsPerSecond) bps)")
+                        let duration = CMTimeGetSeconds(asset.duration)
+                        let srcMbps = duration > 0
+                            ? MediaUploadDebugSettings.approximateSourceTotalMbps(fileBytes: sourceSize, durationSeconds: duration) : 0
+                        let outMbps = duration > 0
+                            ? MediaUploadDebugSettings.approximateSourceTotalMbps(fileBytes: compressedSize, durationSeconds: duration) : 0
+                        NCLog.log(String(format:
+                            "MediaUploadVideoWriter: ACTUAL %@ %lld (%.2f MB, %.3fMbps) → %lld (%.2f MB, %.3fMbps) %dx%d targetVideoBitrate=%d bps",
+                            sourceURL.lastPathComponent,
+                            sourceSize, Double(sourceSize) / 1_048_576.0, srcMbps,
+                            compressedSize, Double(compressedSize) / 1_048_576.0, outMbps,
+                            width, height, videoBitsPerSecond))
                         completion(true)
                     }
                 }

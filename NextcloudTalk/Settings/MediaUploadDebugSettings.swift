@@ -195,11 +195,38 @@ import UniformTypeIdentifiers
         }
         let duration = CMTimeGetSeconds(asset.duration)
         // Short clips: container overhead dominates — allow compress (post-encode still guards).
-        guard duration.isFinite, duration > 2.0 else { return true }
+        guard duration.isFinite, duration > 2.0 else {
+            NCLog.log(String(format:
+                "MediaUploadHeuristic video %@ level=%ld SHORT duration=%.2fs original=%lld → compress=YES (short-clip rule)",
+                fileURL.lastPathComponent, level.rawValue, duration.isFinite ? duration : -1, original))
+            return true
+        }
 
-        let sourceMbps = approximateSourceVideoMbps(fileBytes: original, durationSeconds: duration)
+        let sourceTotalMbps = approximateSourceTotalMbps(fileBytes: original, durationSeconds: duration)
+        let sourceVideoMbps = approximateSourceVideoMbps(fileBytes: original, durationSeconds: duration)
         let targetMbps = targetVideoMbps(profile: profile, durationSeconds: duration)
-        return targetMbps < sourceMbps * shrinkEnableMargin
+        let expectedBytes = estimatedVideoBytes(profile: profile, durationSeconds: duration, originalSize: original)
+        let thresholdMbps = sourceVideoMbps * shrinkEnableMargin
+        let willShrink = targetMbps < thresholdMbps
+
+        let engine = shared().usesAssetWriter ? "writer" : "preset:\(profile.exportPreset)"
+        NCLog.log(String(format:
+            "MediaUploadHeuristic video %@ level=%ld engine=%@ duration=%.2fs original=%lld (%.2f MB) sourceTotal=%.3fMbps sourceVideo=%.3fMbps target=%.3fMbps threshold=%.3fMbps expected=%lld (%.2f MB) → %@",
+            fileURL.lastPathComponent,
+            level.rawValue,
+            engine,
+            duration,
+            original,
+            Double(original) / 1_048_576.0,
+            sourceTotalMbps,
+            sourceVideoMbps,
+            targetMbps,
+            thresholdMbps,
+            expectedBytes,
+            Double(expectedBytes) / 1_048_576.0,
+            willShrink ? "compress" : "skip"))
+
+        return willShrink
     }
 
     /// Whether re-JPEG at `level` is likely ≥10% smaller (no trial encode).
@@ -210,13 +237,16 @@ import UniformTypeIdentifiers
         guard let profile = shared().profile(for: level) else { return false }
 
         let ext = fileURL.pathExtension.lowercased()
-        if ext == "gif" { return false }
+        if ext == "gif" {
+            NCLog.log("MediaUploadHeuristic image \(fileURL.lastPathComponent) level=\(level.rawValue) GIF → skip")
+            return false
+        }
 
         let original = MediaUploadPreprocessor.fileSizePublic(at: fileURL)
         guard original > 0 else { return false }
 
         guard let pixelSize = imagePixelSize(at: fileURL) else {
-            // Unknown dimensions — allow compress; Send path decides.
+            NCLog.log("MediaUploadHeuristic image \(fileURL.lastPathComponent) level=\(level.rawValue) unknown pixels original=\(original) → compress=YES")
             return true
         }
 
@@ -229,23 +259,44 @@ import UniformTypeIdentifiers
         let sourceBpp = (Double(original) * 8.0) / Double(pixelSize.width * pixelSize.height)
         let targetBpp = expectedJPEGBitsPerPixel(qualityPercent: profile.imageJPEGQuality)
         let expectedBytes = Int64((outPixels * targetBpp) / 8.0)
+        let thresholdBytes = Int64(Double(original) * shrinkEnableMargin)
 
-        // Resize almost always wins on large camera photos.
+        let willShrink: Bool
+        var reason = ""
         if scale < 0.95 {
-            return expectedBytes < Int64(Double(original) * shrinkEnableMargin)
+            willShrink = expectedBytes < thresholdBytes
+            reason = "resize"
+        } else if ["heic", "heif", "png", "webp"].contains(ext) {
+            willShrink = expectedBytes < thresholdBytes
+            reason = "heic/png"
+        } else if sourceBpp <= targetBpp * 1.05 {
+            willShrink = false
+            reason = "bpp-already-low"
+        } else {
+            willShrink = expectedBytes < thresholdBytes
+            reason = "quality"
         }
 
-        // Quality-only: if source is already denser-compressed than our target JPEG, skip.
-        // HEIC/PNG often look "small" in bytes but expand when forced to JPEG — require clear win.
-        if ["heic", "heif", "png", "webp"].contains(ext) {
-            return expectedBytes < Int64(Double(original) * shrinkEnableMargin)
-        }
+        NCLog.log(String(format:
+            "MediaUploadHeuristic image %@ level=%ld %@ %.0fx%.0f scale=%.3f q=%d original=%lld (%.2f MB) sourceBpp=%.3f targetBpp=%.3f expected=%lld (%.2f MB) threshold=%lld → %@ (%@)",
+            fileURL.lastPathComponent,
+            level.rawValue,
+            ext,
+            pixelSize.width,
+            pixelSize.height,
+            scale,
+            profile.imageJPEGQuality,
+            original,
+            Double(original) / 1_048_576.0,
+            sourceBpp,
+            targetBpp,
+            expectedBytes,
+            Double(expectedBytes) / 1_048_576.0,
+            thresholdBytes,
+            willShrink ? "compress" : "skip",
+            reason))
 
-        // Already-JPEG (or similar): compare bpp / expected size.
-        if sourceBpp <= targetBpp * 1.05 {
-            return false
-        }
-        return expectedBytes < Int64(Double(original) * shrinkEnableMargin)
+        return willShrink
     }
 
     /// Rough output bpp for `jpegData(compressionQuality:)` (empirical, not a spec).
