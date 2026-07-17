@@ -663,9 +663,8 @@
     NSString *extension = item.fileURL.pathExtension.lowercaseString;
 
     if (item.isImage && extension.length > 0 && [NCUtils isImageWithFileExtension:extension] && ![extension isEqualToString:@"gif"]) {
-        // Mixed bag: chips may be enabled for the video while this photo is already crushed —
-        // skip re-JPEG when the heuristic says we would not shrink (send original).
-        if (![MediaUploadDebugSettings imageCompressionLikelyShrinksAtURL:item.fileURL level:level]) {
+        // Chip may be on because another item benefits — skip this photo if it would not shrink.
+        if (![MediaUploadDebugSettings itemCompressionLikelyShrinksAtURL:item.fileURL level:level]) {
             [NCLog log:[NSString stringWithFormat:@"ShareItemController: skipping image compress for %@ (unlikely to shrink at level %ld)",
                         item.fileName, (long)level]];
             if (progress) {
@@ -717,6 +716,19 @@
     }
 
     if (extension.length > 0 && [MediaUploadPreprocessor isVideoFileExtension:extension]) {
+        // Chip may be on because another item benefits — skip already-small videos.
+        if (![MediaUploadDebugSettings itemCompressionLikelyShrinksAtURL:item.fileURL level:level]) {
+            [NCLog log:[NSString stringWithFormat:@"ShareItemController: skipping video compress for %@ (unlikely to shrink at level %ld)",
+                        item.fileName, (long)level]];
+            if (progress) {
+                progress(1.0f);
+            }
+            if (completion) {
+                completion();
+            }
+            return;
+        }
+
         NSString *mp4Name = [[item.fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"mp4"];
         NSURL *mp4URL = [self getFileLocalURL:mp4Name];
 

@@ -277,44 +277,43 @@ import UniformTypeIdentifiers
     }
 
     /// Manual chip gate: None always.
-    /// - Videos present: every video must likely shrink (images ignored — one level still applies on Send).
-    /// - Photos-only: every compressible image must likely shrink.
+    /// Enable Low/Medium/High if **any** video or image in the bag is likely to shrink;
+    /// non-benefiting items skip that level on Send (as-is).
     public static func compressionLevelLikelyUseful(_ level: MediaUploadCompressionLevel, forFileURLs fileURLs: [URL]) -> Bool {
         if level == .none { return true }
 
-        var sawVideo = false
-        var sawImage = false
-
+        var sawCompressible = false
         for url in fileURLs {
             let ext = url.pathExtension.lowercased()
             if MediaUploadPreprocessor.isVideo(fileExtension: ext) {
-                sawVideo = true
-                if !videoCompressionLikelyShrinks(at: url, level: level) {
-                    return false
+                sawCompressible = true
+                if videoCompressionLikelyShrinks(at: url, level: level) {
+                    return true
                 }
             } else if NCUtils.isImage(fileExtension: ext), ext != "gif" {
-                sawImage = true
-            }
-        }
-
-        if sawVideo {
-            return true
-        }
-
-        // Photos-only (or images + non-media): gate on images.
-        if sawImage {
-            for url in fileURLs {
-                let ext = url.pathExtension.lowercased()
-                guard NCUtils.isImage(fileExtension: ext), ext != "gif" else { continue }
-                if !imageCompressionLikelyShrinks(at: url, level: level) {
-                    return false
+                sawCompressible = true
+                if imageCompressionLikelyShrinks(at: url, level: level) {
+                    return true
                 }
             }
-            return true
         }
 
-        // No media to compress (pdf/audio/etc.) — chips unused; leave enabled.
-        return true
+        // No compressible media (pdf/audio/gif-only): chips unused; leave enabled.
+        return !sawCompressible
+    }
+
+    /// Shared Send-path gate: compress this file at `level` only if likely to shrink.
+    @objc(itemCompressionLikelyShrinksAtURL:level:)
+    public static func itemCompressionLikelyShrinks(at fileURL: URL, level: MediaUploadCompressionLevel) -> Bool {
+        if level == .none { return false }
+        let ext = fileURL.pathExtension.lowercased()
+        if MediaUploadPreprocessor.isVideo(fileExtension: ext) {
+            return videoCompressionLikelyShrinks(at: fileURL, level: level)
+        }
+        if NCUtils.isImage(fileExtension: ext), ext != "gif" {
+            return imageCompressionLikelyShrinks(at: fileURL, level: level)
+        }
+        return false
     }
 
     @objc(sharedSettings)
