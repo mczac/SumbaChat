@@ -124,6 +124,8 @@ Unchanged (GIF skipped; pasted PNG data path unchanged).
   video in the bag is likely ≥10% smaller (source Mbps vs Writer rate or
   guestimated preset Mbps). **Photos-only:** same idea via bits-per-pixel +
   max-edge heuristic (no trial JPEG encode). Mixed bags still gate on videos
-  only. Post-encode still keeps original video if not smaller.
+  only; on Send, images that would not shrink are **skipped** (sent as-is),
+  and any re-JPEG that is not smaller is discarded. Post-encode still keeps
+  original video if not smaller.
 - **Debug ExportSession presets:** picker/row shows guestimated Mbps
   (community figures, not Apple contracts).

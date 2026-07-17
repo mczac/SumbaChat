@@ -663,18 +663,36 @@
     NSString *extension = item.fileURL.pathExtension.lowercaseString;
 
     if (item.isImage && extension.length > 0 && [NCUtils isImageWithFileExtension:extension] && ![extension isEqualToString:@"gif"]) {
+        // Mixed bag: chips may be enabled for the video while this photo is already crushed —
+        // skip re-JPEG when the heuristic says we would not shrink (send original).
+        if (![MediaUploadDebugSettings imageCompressionLikelyShrinksAtURL:item.fileURL level:level]) {
+            [NCLog log:[NSString stringWithFormat:@"ShareItemController: skipping image compress for %@ (unlikely to shrink at level %ld)",
+                        item.fileName, (long)level]];
+            if (progress) {
+                progress(1.0f);
+            }
+            if (completion) {
+                completion();
+            }
+            return;
+        }
+
         NSString *jpegName = [[item.fileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpg"];
         NSURL *jpegURL = [self getFileLocalURL:jpegName];
+        NSURL *sourceURL = item.fileURL;
 
         dispatch_async(self.preparationQueue, ^{
-            BOOL success = [MediaUploadPreprocessor compressImageAtURL:item.fileURL
+            BOOL success = [MediaUploadPreprocessor compressImageAtURL:sourceURL
                                                       toDestinationURL:jpegURL
                                                               settings:settings];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (success) {
                     NSDictionary *attrs = [NSFileManager.defaultManager attributesOfItemAtPath:jpegURL.path error:nil];
                     unsigned long long written = [attrs fileSize];
-                    if (written > 0) {
+                    NSDictionary *srcAttrs = [NSFileManager.defaultManager attributesOfItemAtPath:sourceURL.path error:nil];
+                    unsigned long long original = [srcAttrs fileSize];
+                    // Keep original when re-JPEG did not shrink (same safety net as video).
+                    if (written > 0 && (original == 0 || written < original)) {
                         if (![item.filePath isEqualToString:jpegURL.path]) {
                             [NSFileManager.defaultManager removeItemAtPath:item.filePath error:nil];
                         }
@@ -682,8 +700,8 @@
                         item.filePath = jpegURL.path;
                         item.fileName = jpegURL.lastPathComponent;
                     } else {
-                        NSLog(@"MediaUploadPreprocessor: refusing to swap to 0-byte compressed image %@", jpegURL.lastPathComponent);
-                        [NCLog log:[NSString stringWithFormat:@"ShareItemController: refusing 0-byte compressed image %@", jpegURL.lastPathComponent]];
+                        [NCLog log:[NSString stringWithFormat:@"ShareItemController: image compress not smaller (%llu → %llu); keeping original %@",
+                                    original, written, item.fileName]];
                         [NSFileManager.defaultManager removeItemAtURL:jpegURL error:nil];
                     }
                 }

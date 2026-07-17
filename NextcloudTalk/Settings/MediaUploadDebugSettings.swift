@@ -204,6 +204,7 @@ import UniformTypeIdentifiers
 
     /// Whether re-JPEG at `level` is likely ≥10% smaller (no trial encode).
     /// Uses max-edge scale + rough bits-per-pixel from JPEG quality.
+    @objc(imageCompressionLikelyShrinksAtURL:level:)
     public static func imageCompressionLikelyShrinks(at fileURL: URL, level: MediaUploadCompressionLevel) -> Bool {
         guard level != .none else { return true }
         guard let profile = shared().profile(for: level) else { return false }
