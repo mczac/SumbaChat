@@ -1,6 +1,6 @@
 ---
-name: 🚀 Feature request specifically for Nextcloud Talk iOS
-about: Suggest an idea for Nextcloud Talk iOS
+name: 🚀 Feature request for SumbaChat
+about: Suggest an idea for SumbaChat iOS
 title: ''
 labels: 0. Needs triage, enhancement
 assignees: ''

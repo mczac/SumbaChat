@@ -1,6 +1,6 @@
 /**
  * SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
- * SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -1010,7 +1010,7 @@
 }
 
 - (void)prepareItemsForUploadWithLevelProvider:(NSInteger (^)(ShareItem *item))levelProvider
-                                      progress:(void (^)(float fraction))progress
+                                      progress:(void (^)(float fraction, NSInteger current, NSInteger total))progress
                                    completion:(void (^)(void))completion
 {
     NSArray<ShareItem *> *items = [self.internalShareItems copy];
@@ -1036,7 +1036,7 @@
     if (totalToCompress == 0) {
         [NCLog log:@"ShareItemController: prepareItemsForUpload — nothing to compress"];
         if (progress) {
-            progress(1.0f);
+            progress(1.0f, 0, 0);
         }
         if (completion) {
             completion();
@@ -1073,7 +1073,7 @@
     [itemsToCompress setArray:sortedItems];
     [levelsToCompress setArray:sortedLevels];
 
-    // Telegram-style batch: keep Settings engine (Writer or Presets), encode serially via
+    // Multi-file batch: keep the Settings engine (Writer or Presets), encode serially via
     // MediaUploadVideoEncodeQueue, and cap Writer max-edge so peak RAM stays lower.
     NSInteger videoToCompress = 0;
     unsigned long long videoBytes = 0;
@@ -1120,7 +1120,7 @@
     }
 
     if (progress) {
-        progress(0.0f);
+        progress(0.0f, 1, totalToCompress);
     }
 
     // One encode at a time. Parallel AVAssetWriter sessions jetsam the process when several
@@ -1135,7 +1135,10 @@
                 return;
             }
             float overall = MIN(1.0f, ((float)completedCount + currentItemFraction) / (float)totalToCompress);
-            progress(overall);
+            NSInteger current = completedCount >= totalToCompress
+                ? totalToCompress
+                : MAX((NSInteger)1, completedCount + 1);
+            progress(overall, current, totalToCompress);
         };
         if ([NSThread isMainThread]) {
             emit();
@@ -1223,7 +1226,7 @@
             }
             dispatch_async(prepQueue, ^{
                 @autoreleasepool {
-                    // Telegram-style: always cool mediaserverd between serial encodes.
+                    // Give mediaserverd a breather between serial encodes.
                     [MediaUploadMemoryGateObjC waitForHeadroom];
                     [NSThread sleepForTimeInterval:multiVideo ? 0.35 : 0.12];
                 }

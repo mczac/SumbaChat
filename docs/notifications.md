@@ -9,10 +9,17 @@ not be complete. Please contribute to this list as you gain new knowledge. Just 
 
 SumbaChat uses its own APNs-compatible push proxies because its bundle identifier
 (`com.spl.SumbaChat`) cannot use the APNs credentials of the official Nextcloud
-Talk app:
+Talk app.
 
-- Debug/Xcode builds: `https://push-dev.example.com`
-- Release/TestFlight/App Store builds: `https://push.example.com`
+Proxy URLs are **not** committed. Copy
+`NextcloudTalk/Settings/NCAppBrandingLocal.example.h` to
+`NCAppBrandingLocal.h` (gitignored) and set:
+
+- `NC_BRANDING_PUSH_SERVER_DEBUG` — Debug / Xcode builds
+- `NC_BRANDING_PUSH_SERVER` — Release / TestFlight / App Store builds
+
+Without that file, the app falls back to placeholder `example.com` hosts in
+`NCAppBranding.m`.
 
 After notification permission is granted and both the standard APNs and PushKit
 tokens are available, the app automatically registers every configured account
@@ -28,13 +35,13 @@ again when APNs supplies its tokens. During testing, verify both
 ### Release / TestFlight push entitlement
 
 Debug builds use `NextcloudTalk/NextcloudTalk.entitlements` with
-`aps-environment = development` and the debug proxy
-(`push-dev.example.com`).
+`aps-environment = development` and the debug proxy from
+`NC_BRANDING_PUSH_SERVER_DEBUG`.
 
 Release / Archive / TestFlight builds use
 `NextcloudTalk/NextcloudTalkRelease.entitlements` with
-`aps-environment = production` and the release proxy
-(`push.example.com`). Keep **Automatically manage signing** with
+`aps-environment = production` and the release proxy from
+`NC_BRANDING_PUSH_SERVER`. Keep **Automatically manage signing** with
 **Apple Development**; Xcode Cloud / Archive export switches to
 distribution certificates and App Store profiles for you.
 
@@ -73,7 +80,7 @@ Please make sure you're using the latest version available on the AppStore. Push
 
 If you're using Talk 12 on the server, please make sure you're running atleast version 12.2.1 (see [here for details](https://github.com/nextcloud/spreed/pull/6329)).
 
-Please note that under rare circumstances apple will stop sending (call-)notifications to your device. Those situations will usually resolve automatically after 24h. If your problem still occurs after checking all the hints below and you checked again after 24h, create an issue at https://github.com/nextcloud/talk-ios/issues
+Please note that under rare circumstances apple will stop sending (call-)notifications to your device. Those situations will usually resolve automatically after 24h. If your problem still occurs after checking all the hints below and you checked again after 24h, create an issue at https://github.com/mczac/SumbaChat/issues
 
 ## 🍎 Check iOS settings
 

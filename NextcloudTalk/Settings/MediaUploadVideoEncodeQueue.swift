@@ -1,12 +1,12 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 import Foundation
 
-/// Process-wide serial video encode queue (Telegram `videoConvertQueue` pattern).
-/// Only one AVAssetWriter / AVAssetExportSession runs at a time across the app / Share Extension.
+/// Process-wide serial video encode queue.
+/// Only one AVAssetWriter / AVAssetExportSession runs at a time (app and Share Extension).
 @objcMembers public final class MediaUploadVideoEncodeQueue: NSObject {
 
     @objc public static let shared = MediaUploadVideoEncodeQueue()
@@ -50,7 +50,8 @@ import Foundation
         worker.async {
             job { [weak self] in
                 // Brief mediaserverd cooldown between jobs (Telegram converts one-at-a-time).
-                MediaUploadMemoryGate.waitForHeadroom(minAvailableBytes: 100 * 1024 * 1024, timeout: 1.5)
+                // Uses extension-aware defaults + plateau early-exit (see MediaUploadMemoryGate).
+                MediaUploadMemoryGate.waitForHeadroom()
                 self?.runNext()
             }
         }

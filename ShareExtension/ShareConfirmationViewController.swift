@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -81,6 +81,22 @@ import AVFoundation
     private let prepareProgressShare: Float = 0.55
     /// True while Send has swapped compose UI for the progress surface.
     private var isInSendProgressMode = false
+    /// In-app: compose sheet was dismissed; progress HUD lives on the presenting chat.
+    private var composeDismissedForUpload = false
+    private var isDismissingComposeForUpload = false
+    private weak var progressHostView: UIView?
+    private weak var progressHostViewController: UIViewController?
+    private var lastProgressPhase: UploadHUDPhase?
+    private var lastProgressValue: Float?
+    private var lastProgressIndeterminate = false
+    private var finishAfterComposeDismiss: (() -> Void)?
+    /// Keeps this VC alive after the modal sheet is dismissed until upload ends.
+    private static var retainedForUpload: ShareConfirmationViewController?
+    /// Share Extension: nav chrome hidden while showing the empty sheet + bottom progress.
+    private var extensionProgressChromeActive = false
+    private var savedNavigationTitle: String?
+    private var savedLeftBarButtonItem: UIBarButtonItem?
+    private var savedViewBackgroundColor: UIColor?
     /// Keeps App Group `.upload-session` fresh during long compose (Settings/idle protection).
     private var uploadSessionHeartbeatTimer: Timer?
 
@@ -88,6 +104,43 @@ import AVFoundation
         case text
         case item
         case objectShare
+    }
+
+    private enum UploadHUDPhase {
+        /// Provider / iCloud / local staging copy (before preview is ready).
+        case loadingMedia
+        /// Send-path compression. `current` is 1-based; `total` is files being prepared.
+        case preparing(current: Int, total: Int)
+        /// PUT phase. `current` is 1-based; `total` is files being uploaded.
+        case uploading(current: Int, total: Int)
+
+        var title: String {
+            switch self {
+            case .loadingMedia:
+                return NSLocalizedString("Loading media…", comment: "Shown while shared/picked media is loaded from Photos or another app")
+            case .preparing:
+                return NSLocalizedString("Preparing…", comment: "Shown while media is compressed before upload")
+            case .uploading:
+                return NSLocalizedString("Uploading…", comment: "Upload progress title; details show file count")
+            }
+        }
+
+        var details: String {
+            switch self {
+            case .loadingMedia:
+                return NSLocalizedString("Please wait…", comment: "Detail under Loading media progress alert")
+            case .preparing(let current, let total), .uploading(let current, let total):
+                if total <= 1 {
+                    return NSLocalizedString("1 media file", comment: "Upload progress detail for a single file")
+                }
+                let safeCurrent = min(max(current, 1), total)
+                return String.localizedStringWithFormat(
+                    NSLocalizedString("%ld of %ld media files", comment: "Upload progress detail while processing file N of M"),
+                    safeCurrent,
+                    total
+                )
+            }
+        }
     }
 
     // MARK: - UI Controls
@@ -596,7 +649,7 @@ import AVFoundation
     }
 
     func cancelButtonPressed() {
-        // Telegram-style: abort in-flight work (if any) and leave the flow (chat / host app).
+        // Abort in-flight work (if any) and leave the flow (chat / host app).
         let wasUploading = self.isUploadingMedia || !self.uploadTasks.isEmpty
         self.stopUploadSessionHeartbeat()
         self.cancelMediaFlowIfNeeded()
@@ -609,7 +662,12 @@ import AVFoundation
         } else {
             MediaUploadDiskStore.clearSessionScratchCaches(reason: "sheet-dismiss", wait: false)
         }
-        self.delegate?.shareConfirmationViewControllerDidCancel(self)
+        let notifyCancel = { [weak self] in
+            guard let self else { return }
+            self.releaseUploadRetention()
+            self.delegate?.shareConfirmationViewControllerDidCancel(self)
+        }
+        runWhenComposeDismissSettled(notifyCancel)
     }
 
     /// Stops compression/upload work started by Send. Safe if nothing is in flight.
@@ -632,24 +690,128 @@ import AVFoundation
         self.updateSendButtonEnabledState()
     }
 
-    /// Hide compose chrome and drop heavy preview bitmaps for the Send → progress surface.
-    private func enterSendProgressMode() {
+    /// Drop heavy preview bitmaps before encode/upload (jetsam). Does not blank the UI.
+    private func releaseComposePreviewsForUpload() {
         self.isInSendProgressMode = true
         self.textView.resignFirstResponder()
-        self.setTextInputbarHidden(true, animated: false)
-        self.shareContentView.isHidden = true
-        self.navigationItem.rightBarButtonItem = nil
         self.suppressMediaPreviews = true
         for item in self.shareItemController.shareItems {
             item.placeholderImage = nil
         }
-        MediaUploadTrace.logSync("SEND progress-mode compose hidden items=\(self.shareItemController.shareItems.count)")
+        MediaUploadTrace.logSync("SEND progress-mode previews released items=\(self.shareItemController.shareItems.count)")
+    }
+
+    /// Share Extension: blank the sheet (no room title) while showing bottom progress.
+    private func hideComposeChromeForExtensionProgress() {
+        self.setTextInputbarHidden(true, animated: false)
+        self.shareContentView.isHidden = true
+        self.navigationItem.rightBarButtonItem = nil
+
+        if !extensionProgressChromeActive {
+            extensionProgressChromeActive = true
+            savedNavigationTitle = navigationItem.title
+            savedLeftBarButtonItem = navigationItem.leftBarButtonItem
+            savedViewBackgroundColor = view.backgroundColor
+            navigationItem.title = nil
+            navigationItem.leftBarButtonItem = nil
+            navigationController?.setNavigationBarHidden(true, animated: false)
+            // Empty share surface (system grouped grey).
+            view.backgroundColor = .systemGroupedBackground
+            navigationController?.view.backgroundColor = .systemGroupedBackground
+        }
+        MediaUploadTrace.logSync("SEND progress-mode compose hidden (appex bottom-compact)")
+    }
+
+    private func restoreExtensionProgressChromeIfNeeded() {
+        guard extensionProgressChromeActive else { return }
+        extensionProgressChromeActive = false
+        navigationController?.setNavigationBarHidden(false, animated: false)
+        navigationItem.title = savedNavigationTitle
+        navigationItem.leftBarButtonItem = savedLeftBarButtonItem
+        view.backgroundColor = savedViewBackgroundColor
+        savedNavigationTitle = nil
+        savedLeftBarButtonItem = nil
+        savedViewBackgroundColor = nil
+    }
+
+    private var isAppExtensionProcess: Bool {
+        Bundle.main.bundlePath.hasSuffix(".appex")
+    }
+
+    private var progressAlertHostView: UIView {
+        progressHostView ?? view
+    }
+
+    private func releaseUploadRetention() {
+        if Self.retainedForUpload === self {
+            Self.retainedForUpload = nil
+        }
+        progressHostView = nil
+        progressHostViewController = nil
+        finishAfterComposeDismiss = nil
+        isDismissingComposeForUpload = false
+    }
+
+    /// In-app modal: dismiss compose first, then show the HUD on the presenting chat.
+    /// Returns true when dismiss was started (HUD appears in the completion).
+    /// Share Extension: returns false — caller shows HUD on the sheet instead.
+    @discardableResult
+    private func dismissComposeThenShowProgress(phase: UploadHUDPhase, progress: Float?, indeterminate: Bool) -> Bool {
+        guard !isAppExtensionProcess, isModal, !composeDismissedForUpload else { return false }
+        let presenter = navigationController?.presentingViewController ?? presentingViewController
+        guard let presenter else { return false }
+
+        composeDismissedForUpload = true
+        isDismissingComposeForUpload = true
+        Self.retainedForUpload = self
+        progressHostView = presenter.view
+        progressHostViewController = presenter
+
+        // HUD on chat immediately; sheet dismisses over it (no empty-sheet flash).
+        showProgressAlert(phase: phase, progress: progress, indeterminate: indeterminate)
+
+        let toDismiss: UIViewController = navigationController ?? self
+        MediaUploadTrace.logSync("SEND dismiss compose + HUD on chat")
+        toDismiss.dismiss(animated: true) { [weak self] in
+            guard let self else { return }
+            self.isDismissingComposeForUpload = false
+            if let finish = self.finishAfterComposeDismiss {
+                self.finishAfterComposeDismiss = nil
+                finish()
+            }
+        }
+        return true
+    }
+
+    private func runWhenComposeDismissSettled(_ work: @escaping () -> Void) {
+        if isDismissingComposeForUpload {
+            finishAfterComposeDismiss = work
+        } else {
+            work()
+        }
+    }
+
+    /// Begin progress UI: in-app dismisses sheet then HUD on chat; appex blanks sheet + bottom progress card.
+    private func beginUploadProgressUI(phase: UploadHUDPhase, progress: Float?, indeterminate: Bool) {
+        if dismissComposeThenShowProgress(phase: phase, progress: progress, indeterminate: indeterminate) {
+            return
+        }
+        if isAppExtensionProcess {
+            hideComposeChromeForExtensionProgress()
+        } else {
+            // In-app fallback if dismiss wasn't possible — hide compose under centered HUD.
+            setTextInputbarHidden(true, animated: false)
+            shareContentView.isHidden = true
+            navigationItem.rightBarButtonItem = nil
+        }
+        showProgressAlert(phase: phase, progress: progress, indeterminate: indeterminate)
     }
 
     /// Restore compose after a failed send (Cancel/success dismiss instead).
     private func exitSendProgressMode() {
         guard self.isInSendProgressMode else { return }
         self.isInSendProgressMode = false
+        self.restoreExtensionProgressChromeIfNeeded()
         self.shareContentView.isHidden = false
         self.suppressMediaPreviews = false
         self.shareCollectionView.isUserInteractionEnabled = true
@@ -727,8 +889,11 @@ import AVFoundation
         // Keep cross-process staging lock fresh for the duration of Send.
         MediaUploadDiskStore.touchUploadSession()
 
-        // Drop compose UI (memory + cleaner progress surface). Cancel leaves the flow.
-        self.enterSendProgressMode()
+        MediaUploadHaptics.prepare()
+        MediaUploadHaptics.sendStarted()
+
+        // Drop preview bitmaps; in-app dismisses the sheet then shows HUD on chat.
+        self.releaseComposePreviewsForUpload()
 
         if mode == .noCompression {
             MediaUploadTrace.log("SEND decision=skip-compress (No Compression) — upload originals")
@@ -736,13 +901,13 @@ import AVFoundation
                 let bytes = MediaUploadPreprocessor.fileSizePublic(at: item.fileURL)
                 MediaUploadTrace.log("PLAN \(item.fileName ?? "unknown") level=none(original) original=\(MediaUploadTrace.mb(bytes)) estimate=n/a")
             }
-            self.showProgressAlert(phase: .uploading(count: mediaCount), progress: 0, indeterminate: false)
+            self.beginUploadProgressUI(phase: .uploading(current: 1, total: mediaCount), progress: 0, indeterminate: false)
             self.uploadAndShareFiles()
             return
         }
 
         self.isPreparingForUpload = true
-        self.showProgressAlert(phase: .preparing(count: mediaCount), progress: 0, indeterminate: false)
+        self.beginUploadProgressUI(phase: .preparing(current: 1, total: mediaCount), progress: 0, indeterminate: false)
 
         let chosenLevel = self.chosenCompressionLevel
         let autoURLs = self.shareItemController.shareItems.compactMap(\.fileURL)
@@ -800,9 +965,13 @@ import AVFoundation
             @unknown default:
                 return MediaUploadCompressionLevel.medium.rawValue
             }
-        }, progress: { [weak self] fraction in
+        }, progress: { [weak self] fraction, current, total in
             guard let self, !self.mediaFlowCancelled else { return }
-            self.progressAlert?.setProgress(fraction * self.prepareProgressShare, animated: true)
+            let prepareTotal = total > 0 ? total : mediaCount
+            let prepareCurrent = total > 0 ? current : 1
+            self.showProgressAlert(phase: .preparing(current: prepareCurrent, total: prepareTotal),
+                                   progress: fraction * self.prepareProgressShare,
+                                   indeterminate: false)
         }, completion: { [weak self] in
             guard let self else { return }
             // Keep isPreparingForUpload true until upload path is entered — no preview regen window.
@@ -821,7 +990,8 @@ import AVFoundation
                 MediaUploadTrace.logSync("PREPARE done \(item.fileName ?? "unknown") uploadBytes=\(MediaUploadTrace.mb(bytes))")
             }
             MediaUploadTrace.logSync("PREPARE finished → upload \(self.shareItemController.shareItems.count) item(s) (maxConcurrentPUTs=\(MediaUploadDiskStore.maxConcurrentUploads))")
-            self.showProgressAlert(phase: .uploading(count: self.shareItemController.shareItems.count),
+            let uploadTotal = self.shareItemController.shareItems.count
+            self.showProgressAlert(phase: .uploading(current: 1, total: uploadTotal),
                                    progress: self.prepareProgressShare,
                                    indeterminate: false)
             // Brief yield so AVFoundation settles before kicking off N parallel PUTs.
@@ -1002,51 +1172,38 @@ import AVFoundation
         self.updateCompressionOptionsUI()
     }
 
-    private enum UploadHUDPhase {
-        /// Provider / iCloud / local staging copy (before preview is ready).
-        case loadingMedia
-        /// Send-path compression.
-        case preparing(count: Int)
-        case uploading(count: Int)
-
-        var title: String {
-            switch self {
-            case .loadingMedia:
-                return NSLocalizedString("Loading media…", comment: "Shown while shared/picked media is loaded from Photos or another app")
-            case .preparing:
-                return NSLocalizedString("Preparing…", comment: "Shown while media is compressed before upload")
-            case .uploading:
-                return NSLocalizedString("Uploading…", comment: "Upload progress title; details show file count")
-            }
+    private var progressAlertStyle: MediaUploadProgressAlert.Style {
+        // Share Extension (and any non-dismissed sheet send): compact bottom progress card.
+        // In-app after compose dismiss uses centered HUD on the chat host.
+        if composeDismissedForUpload || progressHostView != nil {
+            return .centeredAlert
         }
-
-        var details: String {
-            switch self {
-            case .loadingMedia:
-                return NSLocalizedString("Please wait…", comment: "Detail under Loading media progress alert")
-            case .preparing(let count), .uploading(let count):
-                if count == 1 {
-                    return NSLocalizedString("1 media file", comment: "Upload progress detail for a single file")
-                }
-                return String.localizedStringWithFormat(
-                    NSLocalizedString("%ld media files", comment: "Upload progress detail for multiple files"),
-                    count
-                )
-            }
+        if isAppExtensionProcess {
+            return .bottomCompact
         }
+        // In-app before/without dismiss fallback — still centered.
+        return .centeredAlert
     }
 
     private func showProgressAlert(phase: UploadHUDPhase, progress: Float?, indeterminate: Bool) {
+        lastProgressPhase = phase
+        lastProgressValue = progress
+        lastProgressIndeterminate = indeterminate
+
+        let host = progressAlertHostView
+        let style = progressAlertStyle
         let alert: MediaUploadProgressAlert
-        if let existing = self.progressAlert {
+        if let existing = self.progressAlert, existing.style == style {
             alert = existing
+            alert.present(on: host, animated: false)
         } else {
-            alert = MediaUploadProgressAlert()
+            self.progressAlert?.dismiss(animated: false)
+            alert = MediaUploadProgressAlert(style: style)
             alert.onCancel = { [weak self] in
                 self?.cancelButtonPressed()
             }
             self.progressAlert = alert
-            alert.present(on: self.view, animated: true)
+            alert.present(on: host, animated: true)
         }
 
         alert.update(title: phase.title,
@@ -1059,6 +1216,18 @@ import AVFoundation
     private func hideProgressAlert() {
         self.progressAlert?.dismiss(animated: true)
         self.progressAlert = nil
+    }
+
+    private func presentUploadFailureOnHost(message: String) {
+        let alert = UIAlertController(title: NSLocalizedString("Upload failed", comment: ""),
+                                      message: message,
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default))
+        if let host = progressHostViewController {
+            host.present(alert, animated: true)
+        } else if presentedViewController == nil, view.window != nil {
+            present(alert, animated: true)
+        }
     }
 
     // MARK: - Add additional items
@@ -1157,17 +1326,25 @@ import AVFoundation
         guard self.progressAlert != nil else { return }
 
         DispatchQueue.main.async {
-            var progress: CGFloat = 0.0
-            var items = 0
+            let items = self.shareItemController.shareItems
+            let total = items.count
+            guard total > 0 else { return }
 
-            for shareItem in self.shareItemController.shareItems {
-                progress += shareItem.uploadProgress
-                items += 1
+            var progressSum: CGFloat = 0
+            var completed = 0
+            for shareItem in items {
+                progressSum += shareItem.uploadProgress
+                if shareItem.uploadProgress >= 1.0 - .ulpOfOne {
+                    completed += 1
+                }
             }
 
-            let uploadFraction = items > 0 ? Float(progress / CGFloat(items)) : 0
+            let uploadFraction = Float(progressSum / CGFloat(total))
             let prepareShare = self.mediaUploadMode == .noCompression ? 0 : self.prepareProgressShare
-            self.progressAlert?.setProgress(prepareShare + (1 - prepareShare) * uploadFraction, animated: true)
+            let current = completed >= total ? total : max(1, completed + 1)
+            self.showProgressAlert(phase: .uploading(current: current, total: total),
+                                   progress: prepareShare + (1 - prepareShare) * uploadFraction,
+                                   indeterminate: false)
         }
     }
 
@@ -1190,7 +1367,7 @@ import AVFoundation
 
         let count = self.shareItemController.shareItems.count
         let prepareShare = self.mediaUploadMode == .noCompression ? Float(0) : self.prepareProgressShare
-        self.showProgressAlert(phase: .uploading(count: count), progress: prepareShare, indeterminate: false)
+        self.showProgressAlert(phase: .uploading(current: 1, total: count), progress: prepareShare, indeterminate: false)
 
         self.uploadGroup = DispatchGroup()
         self.uploadErrors = []
@@ -1226,16 +1403,20 @@ import AVFoundation
                     DispatchQueue.main.async {
                         self.isUploadingMedia = false
                         self.isPreparingForUpload = false
-                        self.hideProgressAlert()
-                        self.exitSendProgressMode()
-                        bgTask.stopBackgroundTask()
-                        let alert = UIAlertController(
-                            title: NSLocalizedString("Upload failed", comment: ""),
-                            message: NSLocalizedString("Could not prepare upload folder", comment: ""),
-                            preferredStyle: .alert
-                        )
-                        alert.addAction(UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default))
-                        self.present(alert, animated: true)
+                        self.isInSendProgressMode = false
+                        let message = NSLocalizedString("Could not prepare upload folder", comment: "")
+                        let settle = {
+                            self.hideProgressAlert()
+                            if self.composeDismissedForUpload {
+                                self.presentUploadFailureOnHost(message: message)
+                                self.releaseUploadRetention()
+                            } else {
+                                self.exitSendProgressMode()
+                                self.presentUploadFailureOnHost(message: message)
+                            }
+                            bgTask.stopBackgroundTask()
+                        }
+                        self.runWhenComposeDismissSettled(settle)
                     }
                     return
                 }
@@ -1298,38 +1479,47 @@ import AVFoundation
             self.isUploadingMedia = false
             self.isPreparingForUpload = false
             self.uploadTasks.removeAll()
-            self.hideProgressAlert()
 
-            if self.mediaFlowCancelled {
-                NCLog.log("Media upload: upload group finished after cancel — suppressing result UI")
-                self.isInSendProgressMode = false
+            let settle: () -> Void = { [weak self] in
+                guard let self else { return }
+                self.hideProgressAlert()
+
+                if self.mediaFlowCancelled {
+                    NCLog.log("Media upload: upload group finished after cancel — suppressing result UI")
+                    self.isInSendProgressMode = false
+                    self.releaseUploadRetention()
+                    bgTask.stopBackgroundTask()
+                    return
+                }
+
+                // TODO: Do error reporting per item
+                if self.uploadErrors.isEmpty {
+                    self.isInSendProgressMode = false
+                    self.finishingSuccessfulUpload = true
+                    self.shareItemController.removeAllItems()
+                    self.finishingSuccessfulUpload = false
+                    MediaUploadHaptics.uploadSucceeded()
+                    self.releaseUploadRetention()
+                    self.delegate?.shareConfirmationViewControllerDidFinish(self)
+                } else if self.composeDismissedForUpload {
+                    // Compose sheet already gone — surface the error on the chat host.
+                    self.isInSendProgressMode = false
+                    MediaUploadHaptics.uploadFailed()
+                    let message = self.uploadErrors.joined(separator: "\n")
+                    self.presentUploadFailureOnHost(message: message)
+                    self.releaseUploadRetention()
+                } else {
+                    // Keep failed items and restore compose so the user can retry or Cancel out.
+                    self.shareItemController.remove(self.uploadSuccess)
+                    self.exitSendProgressMode()
+                    self.updateCompressionOptionsUI()
+                    MediaUploadHaptics.uploadFailed()
+                    self.presentUploadFailureOnHost(message: self.uploadErrors.joined(separator: "\n"))
+                }
+
                 bgTask.stopBackgroundTask()
-                return
             }
-
-            // TODO: Do error reporting per item
-            if self.uploadErrors.isEmpty {
-                self.isInSendProgressMode = false
-                self.finishingSuccessfulUpload = true
-                self.shareItemController.removeAllItems()
-                self.finishingSuccessfulUpload = false
-                self.delegate?.shareConfirmationViewControllerDidFinish(self)
-            } else {
-                // Keep failed items and restore compose so the user can retry or Cancel out.
-                self.shareItemController.remove(self.uploadSuccess)
-                self.exitSendProgressMode()
-                self.updateCompressionOptionsUI()
-
-                let alert = UIAlertController(title: NSLocalizedString("Upload failed", comment: ""),
-                                              message: self.uploadErrors.joined(separator: "\n"),
-                                              preferredStyle: .alert)
-
-                alert.addAction(UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default))
-
-                self.present(alert, animated: true)
-            }
-
-            bgTask.stopBackgroundTask()
+            self.runWhenComposeDismissSettled(settle)
         }
     }
 

@@ -1,6 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -10,7 +9,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Video encode backend for Build 9 debug.
+/// Video encode backend selectable from Debug settings.
 @objc public enum MediaUploadVideoEngine: Int {
     case assetWriter = 0
     case exportSession = 1
@@ -135,7 +134,7 @@ import UniformTypeIdentifiers
     }
 }
 
-/// Build 9 debug compression controls. Mirrored to App Group for Share Extension.
+/// Debug compression knobs (profiles, engine, caps). Shared via App Group with the Share Extension.
 @objcMembers public final class MediaUploadDebugSettings: NSObject, Codable {
     private static let storageKey = "ncMediaUploadDebugSettings"
     private static let lock = NSLock()

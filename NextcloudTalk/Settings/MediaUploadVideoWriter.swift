@@ -1,6 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -15,32 +14,78 @@ enum MediaUploadMemoryGate {
         UInt64(os_proc_available_memory())
     }
 
-    /// Block the calling (background) thread until free memory recovers or timeout.
+    /// Share Extension process — free memory often plateaus ~100 MB while Photos is open.
+    static var isAppExtension: Bool {
+        Bundle.main.bundlePath.hasSuffix(".appex")
+    }
+
+    /// App: 120 MB. Appex: 80 MB (logs showed ~103 MB free never reaching 120).
+    static var defaultMinAvailableBytes: UInt64 {
+        isAppExtension ? 80 * 1024 * 1024 : 120 * 1024 * 1024
+    }
+
+    /// App: 2.5 s. Appex: 1.0 s — plateau bail usually exits sooner anyway.
+    static var defaultTimeout: TimeInterval {
+        isAppExtension ? 1.0 : 2.5
+    }
+
+    /// Block the calling (background) thread until free memory recovers, plateaus, or timeout.
     /// `os_proc_available_memory()` may return 0 when unknown — do not spin on that
     /// (was burning a full 2.5s after multi-video ExportSession, masking the real handoff crash).
-    static func waitForHeadroom(minAvailableBytes: UInt64 = 120 * 1024 * 1024,
-                                timeout: TimeInterval = 2.5) {
+    ///
+    /// When free memory stops improving (~2 MB over 3 spins), bail early: waiting the full
+    /// timeout does not create headroom and only slows multi-photo/video share.
+    static func waitForHeadroom(minAvailableBytes: UInt64? = nil,
+                                timeout: TimeInterval? = nil) {
+        let minBytes = minAvailableBytes ?? defaultMinAvailableBytes
+        let timeoutValue = timeout ?? defaultTimeout
         let available = availableBytes()
         if available == 0 {
             MediaUploadTrace.logSync(String(format: "JETSAM MemoryGate skip wait (available unknown), min=%.0fMB",
-                                            Double(minAvailableBytes) / 1_048_576.0))
+                                            Double(minBytes) / 1_048_576.0))
             return
         }
-        if available >= minAvailableBytes {
+        if available >= minBytes {
             return
         }
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = Date().addingTimeInterval(timeoutValue)
+        let improveBytes: UInt64 = 2 * 1024 * 1024
+        let plateauLimit = 3
         var spins = 0
-        while availableBytes() < minAvailableBytes, Date() < deadline {
+        var plateauSpins = 0
+        var best = available
+        var exitedForPlateau = false
+        while Date() < deadline {
+            let now = availableBytes()
+            if now >= minBytes {
+                break
+            }
             spins += 1
             Thread.sleep(forTimeInterval: 0.08)
             autoreleasepool { }
+
+            let after = availableBytes()
+            if after >= best &+ improveBytes {
+                best = after
+                plateauSpins = 0
+            } else {
+                if after > best {
+                    best = after
+                }
+                plateauSpins += 1
+                if plateauSpins >= plateauLimit {
+                    exitedForPlateau = true
+                    break
+                }
+            }
         }
         if spins > 0 {
-            MediaUploadTrace.logSync(String(format: "JETSAM MemoryGate waited %d spin(s) avail=%.1fMB (min=%.0fMB)",
+            let reason = exitedForPlateau ? "plateau" : (availableBytes() >= minBytes ? "ok" : "timeout")
+            MediaUploadTrace.logSync(String(format: "JETSAM MemoryGate waited %d spin(s) avail=%.1fMB (min=%.0fMB) reason=%@",
                                             spins,
                                             Double(availableBytes()) / 1_048_576.0,
-                                            Double(minAvailableBytes) / 1_048_576.0))
+                                            Double(minBytes) / 1_048_576.0,
+                                            reason))
         }
     }
 
@@ -149,7 +194,7 @@ enum MediaUploadVideoWriter {
             }
             reader.add(videoReaderOutput)
 
-            // Telegram TGMediaVideoConverter: H.264 High + CABAC + target bitrate/fps.
+            // H.264 High + CABAC at the profile target bitrate/fps.
             let compression: [String: Any] = [
                 AVVideoAverageBitRateKey: videoBitsPerSecond,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,

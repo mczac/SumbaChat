@@ -1,5 +1,5 @@
 /**
- * SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Copy this file to NCAppBrandingLocal.h and fill in your deployment values.

@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -14,10 +14,7 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
         view.isEditable = false
         view.isSelectable = true
         view.alwaysBounceVertical = true
-        view.backgroundColor = .systemBackground
         view.textContainerInset = UIEdgeInsets(top: 16, left: 14, bottom: 24, right: 14)
-        view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.textColor = .label
         view.adjustsFontForContentSizeCategory = false
         return view
     }()
@@ -26,7 +23,6 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
         super.viewDidLoad()
         title = NSLocalizedString("Compression Algo", comment: "Debug screen explaining media compression")
         NCAppBranding.styleViewController(self)
-        view.backgroundColor = .systemBackground
         view.addSubview(textView)
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -34,102 +30,117 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
             textView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             textView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
-        textView.text = Self.document
+        reloadDocument()
     }
 
-    private static let document = """
-    MEDIA COMPRESSION ALGO
-    ======================
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+        reloadDocument()
+    }
 
-    Modes (Settings → Compression)
-    ------------------------------
-    None        Upload originals (no re-encode).
-    Automatic   Per file: pick Mildest level whose estimate
-                × (1 + margin) stays under the max file size.
-                Photo margin default 20%, video 10% (Debug).
-    Manual      User picks None / Low / Medium / High chips
-                on the send sheet (estimates shown).
+    private func reloadDocument() {
+        let colors = DebugAlgoCodeDocument.colors(for: traitCollection)
+        view.backgroundColor = colors.background
+        textView.backgroundColor = colors.background
+        textView.attributedText = DebugAlgoCodeDocument.highlighted(Self.source, colors: colors)
+    }
 
-    Levels are aggressiveness, not Apple preset names:
-      Low    = milder shrink, better quality
-      Medium = balanced default
-      High   = stronger shrink, smaller files
+    private static let source = #"""
+    // COMPRESSION ALGO
+    // SumbaChat — readable summary of the live compression path
 
+    // MARK: - Modes (Settings → Compression)
 
-    VIDEO ENGINES
-    -------------
-    Debug → Media Compression Settings → Video engine
+    enum Mode {
+        case none        // Upload originals (no re-encode)
+        case automatic   // Per file: mildest level under max file size
+        case manual      // User chips: None / Low / Medium / High
+    }
 
-    1) Bitrate  (AVAssetWriter)     [default]
-       • Target TOTAL rate in Mbps (video+audio budget).
-       • Writer derives video bitrate ≈ rateMbps×1e6 − 128 kbps audio.
-       • Scales to profile videoMaxEdge (and batch edge cap).
-       • Uses profile videoFPS.
-       • Estimate ≈ rateMbps × duration (bits → bytes).
-       • On Writer failure → falls back to ExportSession once.
+    // Levels = aggressiveness (not Apple preset names)
+    enum Level {
+        case low     // milder shrink, better quality
+        case medium  // balanced default
+        case high    // stronger shrink, smaller files
+    }
 
-    2) Presets  (AVAssetExportSession)
-       • Apple preset per level (e.g. 720p / 540p / LowQuality).
-       • Apple chooses bitrate; we only pick the preset.
-       • Estimate from calibrated Mbps tables + duration
-         (or Apple estimatedOutputFileLength when available).
+    // Automatic margins (Debug): photo 20%, video 10%
 
 
-    IMAGE PIPELINE
-    --------------
-    • Prefer ImageIO thumbnail + JPEG destination
-        - max edge = profile imageMaxDimension
-        - quality   = profile imageJPEGQuality (0–100 → 0–1)
-        - orientation baked via transform
-        - GPS / bulky EXIF stripped (no property copy)
-    • Fallback: UIImage decode → jpegData(compressionQuality:)
-    • Skip GIF; skip if “unlikely to shrink”.
-    • Convert-cache key: content fingerprint + profile
-      (reuse same encode on re-send with same settings).
+    // MARK: - Video engines
+    // Debug → Media Compression Settings → Video engine
+
+    // 1) Bitrate — AVAssetWriter [default]
+    //    target TOTAL Mbps (video+audio); video ≈ rate×1e6 − 128 kbps
+    //    scales to videoMaxEdge (+ batch edgeCap); uses videoFPS
+    //    estimate ≈ rateMbps × duration; Writer fail → ExportSession once
+
+    // 2) Presets — AVAssetExportSession
+    //    Apple preset per level (720p / 540p / LowQuality)
+    //    estimate from Mbps tables or estimatedOutputFileLength
 
 
-    VIDEO PIPELINE
-    --------------
-    • Serial encode (process-wide queue) — one video at a time
-      (Share Extension jetsam mitigation).
-    • MemoryGate waits for ~100–120 MB free between encodes.
-    • Multi-video Manual batches may lower edgeCap (e.g. 640)
-      so peak memory stays safer; logged as edgeCap=.
-    • Output must be smaller than source or we keep original.
-    • Success → store in convert cache; after upload PROPFIND
-      → promote into download cache for reopen.
+    // MARK: - Image pipeline
+
+    // Prefer ImageIO thumbnail + JPEG destination
+    //   maxEdge = imageMaxDimension
+    //   quality = imageJPEGQuality (0…100 → 0…1)
+    //   orientation via transform; GPS / bulky EXIF stripped
+    // Fallback: UIImage → jpegData(compressionQuality:)
+    // Skip GIF; skip if unlikely to shrink
+    // Convert-cache key = content fingerprint + profile
 
 
-    SINGLE vs MULTIPLE
-    ------------------
-    Single file
-      Encode (if needed) → one PUT → promote.
+    // MARK: - Video pipeline
 
-    Multiple files
-      • Videos: always serial encode (never parallel Writer).
-      • Photos: compress on the preparation queue (still
-        gated by MemoryGate after each image).
-      • Upload: max 2 concurrent PUTs (UploadGate).
-      • Previews dropped on Send (progress alert) to free RAM.
+    // Serial encode (process-wide queue) — one video at a time
+    // MemoryGate: ~120 MB free in-app / ~80 MB in Share Extension
+    //   bails early if free memory plateaus
+    // Multi-video Manual may lower edgeCap (e.g. 640)
+    // Keep original if output not smaller
+    // Success → convert cache; after PUT → promote to download/
 
 
-    AUTOMATIC PICK (per file)
-    -------------------------
-      for level in [Low, Medium, High]:
-        if estimate(level) × (1 + margin/100) < maxFileBytes:
-          choose level; stop
-      else
-        still use High (best effort)
+    // MARK: - Single vs multiple
 
-    Bag limit is selection count (10), not total bytes.
+    // Single:  encode (if needed) → one PUT → promote
+    // Multiple:
+    //   videos serial; photos on preparation queue (+ MemoryGate)
+    //   upload max 2 concurrent PUTs (UploadGate)
+    //   previews dropped on Send
 
 
-    CACHE TOUCHPOINTS
-    -----------------
-    See Debug → Cache Policy for the full map (download /
-    upload / convert / thumbs / SD + URLCache, caps, LRU).
+    // MARK: - Automatic pick (per file)
 
-    Grep device logs:  MediaUploadTrace:
-    Timestamps are UTC (…Z). Lines tagged [bBUILD].
-    """
+    func pickAutomaticLevel(
+        estimate: (Level) -> Int64,
+        maxFileBytes: Int64,
+        marginPercent: Double
+    ) -> Level {
+        let candidates: [Level] = [.low, .medium]
+
+        for level in candidates {
+            let est = estimate(level)
+            // Accept if estimate × (1 + margin/100) < maxFileBytes
+            if est * (100 + Int64(marginPercent)) / 100 < maxFileBytes {
+                return level   // choose and stop
+            }
+            // else: try next candidate (do not assign High here)
+        }
+
+        return .high   // best effort — once, after both failed
+    }
+
+    // Bag limit = selection count (10), not total bytes
+
+
+    // MARK: - Cache touchpoints
+
+    // See Debug → Caching Algo for download / upload / convert /
+    // thumbs / SDImageCache + URLCache, caps, LRU.
+
+    // Grep logs: MediaUploadTrace:
+    // Timestamps UTC (…Z). Lines tagged [bBUILD].
+    """#
 }

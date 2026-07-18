@@ -1,28 +1,26 @@
 <!--
   - SPDX-FileCopyrightText: 2021 Nextcloud GmbH and Nextcloud contributors
+  - SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
   - SPDX-License-Identifier: GPL-3.0-or-later
 -->
 # Security Policy
 
 ## Supported Versions
 
-Only the latest major release version of Nextcloud Talk iOS is currently being supported with security updates.
+Security fixes are applied to the latest SumbaChat release line published from this repository.
 
 ## Reporting a Vulnerability
 
-Security is very important to us. If you have discovered a security issue with Nextcloud,
-please read our responsible disclosure guidelines and contact us at [hackerone.com/nextcloud](https://hackerone.com/nextcloud).
-Your report should include:
+### SumbaChat (this fork)
 
-- Product version
-- A vulnerability description
-- Reproduction steps
+If the issue is in SumbaChat-specific code (branding, media upload/compression, caching, push-proxy wiring, etc.), please report it privately via [GitHub Security Advisories](https://github.com/mczac/SumbaChat/security/advisories/new) for this repository.
 
-A member of the security team will confirm the vulnerability, determine its impact, and develop a fix.
-The fix will be applied to the main branch, tested, and packaged in the next security release.
-The vulnerability will be publicly announced after the release. Finally, your name will be added
-to the [hall of fame](https://hackerone.com/nextcloud/thanks) as a thank you from the entire Nextcloud community. Note our 
-[threat model](https://nextcloud.com/security/threat-model) to know what is expected behavior.
+Include:
 
+- App version / build number
+- A clear description of the issue
+- Steps to reproduce
 
-Please visit https://nextcloud.com/security/ for further information about security.
+### Upstream Nextcloud Talk
+
+If the vulnerability is in shared Talk / Nextcloud client code and also affects [nextcloud/talk-ios](https://github.com/nextcloud/talk-ios), please follow Nextcloud’s responsible disclosure process: [hackerone.com/nextcloud](https://hackerone.com/nextcloud). See also [nextcloud.com/security](https://nextcloud.com/security/).

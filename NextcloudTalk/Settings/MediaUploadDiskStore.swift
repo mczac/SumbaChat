@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -158,7 +158,7 @@ import UIKit
             }
             try? fileManager.setAttributes(attrs, ofItemAtPath: destPath)
             Self.applyFileProtection(atPath: destPath)
-            touchCacheAccess(atPath: destPath)
+            Self.touchCacheAccess(atPath: destPath)
 
             // Align size if copy differs (should match).
             if let size = (try? fileManager.attributesOfItem(atPath: destPath)[.size] as? Int64), size != remoteBytes {
@@ -606,17 +606,22 @@ import UIKit
         public var total: Int64 { images + videos + documents }
     }
 
-    /// Settings display: MB under 1 GB, otherwise GB (e.g. 120 MB, 1.2 GB — not 1200 MB).
+    /// Settings display: whole units only (e.g. `512 KB`, `57 MB`, `3 GB` — no decimals).
     public static func formatCacheBytes(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowsNonnumericFormatting = false
-        if bytes < 1_024 * 1_024 * 1_024 {
-            formatter.allowedUnits = [.useMB]
-        } else {
-            formatter.allowedUnits = [.useGB]
+        let value = max(0, bytes)
+        let kb: Int64 = 1024
+        let mb = kb * 1024
+        let gb = mb * 1024
+        if value < kb {
+            return "\(value) B"
         }
-        return formatter.string(fromByteCount: max(0, bytes))
+        if value < mb {
+            return "\(value / kb) KB"
+        }
+        if value < gb {
+            return "\(value / mb) MB"
+        }
+        return "\(value / gb) GB"
     }
 
     private static func cacheKind(forFileURL url: URL) -> CacheKind {

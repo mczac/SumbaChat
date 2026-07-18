@@ -1,6 +1,6 @@
 /**
  * SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
- * SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -62,9 +62,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (UIImage * _Nullable)getImageFromItem:(ShareItem *)item;
 
 /// Compress staged originals before upload. Provider returns MediaUploadCompressionLevel raw value.
-/// `progress` reports overall prepare fraction 0…1 (main thread), including in-flight video export.
+/// `progress` reports overall prepare fraction 0…1 plus 1-based current/total (main thread).
 - (void)prepareItemsForUploadWithLevelProvider:(NSInteger (^)(ShareItem *item))levelProvider
-                                      progress:(void (^ _Nullable)(float fraction))progress
+                                      progress:(void (^ _Nullable)(float fraction, NSInteger current, NSInteger total))progress
                                    completion:(void (^)(void))completion;
 
 /// Stop in-flight Send-path compression (video export). Safe to call from Cancel.

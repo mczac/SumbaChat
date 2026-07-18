@@ -1,6 +1,6 @@
 /**
  * SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
- * SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -34,7 +34,7 @@ typedef enum NCTextColorStyle {
 
 NSString * const talkAppName = @"SumbaChat";
 NSString * const filesAppName = @"SumbaFiles";
-NSString * const copyright = @"© 2026 Ivan Cursorov and Peter Zakharov";
+NSString * const copyright = @"© 2026 Ivan Cursoroff and Peter Zakharov";
 NSString * const licenseNotice = @"Based on Nextcloud Talk, licensed under GPLv3";
 NSString * const bundleIdentifier = @"com.spl.SumbaChat";
 NSString * const groupIdentifier = @"group.com.spl.SumbaChat";

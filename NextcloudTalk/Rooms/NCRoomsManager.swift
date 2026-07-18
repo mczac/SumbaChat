@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2024 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -235,7 +235,7 @@ class NCRoomsManager: NSObject, CallViewControllerDelegate {
             if let error {
                 NCLog.log("Could not update room. Error: \(error.localizedDescription)")
 
-                // Room removed server-side (e.g. Sumba Chat Ops) — purge local Realm so iPhone
+                // Room removed server-side (e.g. SumbaChat Ops) — purge local Realm so iPhone
                 // does not keep a ghost conversation until the next full rooms sync.
                 if error.responseStatusCode == 404 {
                     self.purgeLocalRoom(token: token, accountId: account.accountId)

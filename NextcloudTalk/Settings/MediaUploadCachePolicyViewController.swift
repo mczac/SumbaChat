@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -14,19 +14,15 @@ final class MediaUploadCachePolicyViewController: UIViewController {
         view.isEditable = false
         view.isSelectable = true
         view.alwaysBounceVertical = true
-        view.backgroundColor = .systemBackground
         view.textContainerInset = UIEdgeInsets(top: 16, left: 14, bottom: 24, right: 14)
-        view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.textColor = .label
         view.adjustsFontForContentSizeCategory = false
         return view
     }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = NSLocalizedString("Cache Policy", comment: "Debug screen explaining media / attachment caches")
+        title = NSLocalizedString("Caching Algo", comment: "Debug screen explaining media / attachment caches")
         NCAppBranding.styleViewController(self)
-        view.backgroundColor = .systemBackground
         view.addSubview(textView)
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -34,99 +30,124 @@ final class MediaUploadCachePolicyViewController: UIViewController {
             textView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             textView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
-        textView.text = Self.document
+        reloadDocument()
     }
 
-    private static let document = """
-    CACHE POLICY
-    ============
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+        reloadDocument()
+    }
 
-    Layout (App Group Library/Caches/SumbaMedia/)
-    ---------------------------------------------
-    download/   Full chat attachments (open / promote).
-                Settings: Cached Images / Videos / Documents
-                + Cache limit. Cap = Settings value (~3 GB
-                default). Purge at 95% → 80% by LRU access.
-    upload/     Send staging (original then outgoing file).
-                Soft cap 512 MB. Wiped after send, Cancel,
-                next share session, or Settings clear.
-                Cross-process: .upload-session marker (45 min)
-                blocks Settings/idle wipe while share is open.
-                Touched on stage + every 10 min while sheet open.
-                Cancel-during-upload delays wipe ~2.5s.
-    convert/    Encoded reuse per account
-                (convert/{accountId}/ + v2 fingerprint + profile).
-                Soft cap 512 MB. LRU on convert-HIT. Cleared
-                from Settings Convert cache row (not Cache limit).
-                Files use completeUntilFirstUserAuthentication.
-    thumbs/     Share-sheet image previews only. Session wipe
-                with upload/. Own Settings size row.
+    private func reloadDocument() {
+        let colors = DebugAlgoCodeDocument.colors(for: traitCollection)
+        view.backgroundColor = colors.background
+        textView.backgroundColor = colors.background
+        textView.attributedText = DebugAlgoCodeDocument.highlighted(
+            Self.source,
+            colors: colors,
+            extraTypes: ["ShareItem", "AppGroup"]
+        )
+    }
 
+    private static let source = #"""
+    // CACHING ALGO
+    // SumbaChat — readable summary of cache layout and eviction
+    // Layout: App Group Library/Caches/SumbaMedia/
 
-    System (not under SumbaMedia/)
-    ------------------------------
-    SDImageCache   Avatars, server file previews, link thumbs.
-                   ~100 MB / ~4 weeks (NCAPIController).
-    URLCache       HTTP bodies under SDWebImage / URLSession.
-                   Cleared with System previews row.
+    enum Store {
+        case download   // Full chat attachments (open / promote)
+        case upload     // Send staging (original → outgoing)
+        case convert    // Encoded reuse per account
+        case thumbs     // Share-sheet image previews
+        case system     // SDImageCache + URLCache (not SumbaMedia)
+    }
 
 
-    Settings → Advanced map
-    -----------------------
-    Cached Images/Videos/Documents
-      = download/ only, by type. Sum = usage vs Cache limit.
-    Cache limit
-      = max bytes for download/ only.
-    Upload staging / Convert cache / Share thumbs /
-    System previews
-      = everything else (sizes + clear). Not in Cache limit.
+    // MARK: - download/  (Chat cache / Cache limit)
+
+    // Settings → Advanced → Caching → Chat cache
+    // Cap = Cache limit (~3 GB default)
+    // Purge when usage > 95% of limit → LRU until ≤ 80%
+    // Sort key: contentAccessDate (fallback creationDate)
+    // Never bump modificationDate on HIT
+    //   (STALE still compares remote mtime + size)
 
 
-    Send one video (compress on)
-    ----------------------------
-    1. Original → upload/
-    2. Prepare: convert miss → encode into upload/
-       + STORE copy in convert/
-       (or convert-HIT → copy into upload/)
-    3. PUT from upload/ path (ShareItem.filePath)
-    4. PROPFIND OK → promote copy → download/
-    5. Success → wipe upload/ + thumbs/; convert/ kept
+    // MARK: - upload/  (Upload staging)
+
+    // Soft cap 512 MB (not Cache limit)
+    // Wiped after send, Cancel, next share, or Settings clear
+    // .upload-session marker (45 min) blocks Settings/idle wipe
+    // Touched on stage + every 10 min while sheet open
+    // Cancel-during-upload delays wipe ~2.5s
+    // Soft-cap cleanup: FIFO by creationDate
 
 
-    Open attachment in chat
-    -----------------------
-    download-HIT   size + remote mtime match → open local;
-                   bump contentAccessDate (LRU).
-    download-STALE mismatch → delete local, re-download.
-    Bubble preview = server preview URL → SDImageCache
-                   (not thumbs/).
+    // MARK: - convert/  (Convert cache)
+
+    // Path: convert/{accountId}/ + v2 fingerprint + profile
+    // Soft cap 512 MB; LRU on convert-HIT
+    // File protection: completeUntilFirstUserAuthentication
+    // Cleared from Caching → Convert (not Cache limit)
 
 
-    Purge rules
-    -----------
-    download/ + convert/  LRU by contentAccessDate
-                          (fallback creationDate).
-                          Never bump modificationDate on HIT
-                          (STALE key = remote mtime + size).
-    upload/               Soft cap FIFO by creation; session
-                          wipe is the main cleanup.
-    Scratch idle launch   skipped while .upload-session is
-                          fresh; else files older than 30 min.
-    Cancel after PUT      verify / folder-retry / post callbacks
-                          re-check mediaFlowCancelled.
-    Atomic writes         ImageIO + convert-STORE via temp sibling
-                          then move (no corrupt HIT on crash).
-    Staging fallback      No mapped full-file read for videos or
-                          files > 48 MB (jetsam).
-    Staging names         lastPathComponent only; reject . / ..
-                          (no App Group path traversal).
-    Folder retry          PROPFIND exist → ready; 404 → create.
+    // MARK: - thumbs/ + system
+
+    // thumbs/  share previews; wiped with upload/
+    // SDImageCache  avatars / server previews (~100 MB / ~4 weeks)
+    // URLCache      HTTP bodies; cleared with System previews
 
 
-    Grep device logs:  MediaUploadTrace:
-    CACHE download-HIT|MISS|STALE|OK|FAIL
-    CACHE convert-HIT|STORE
-    CACHE promote / purge / scratch-clear
-    Timestamps UTC (…Z). Lines tagged [bBUILD].
-    """
+    // MARK: - Settings map
+
+    // Advanced → Caching
+    //   Chat cache bar  = download/ vs Cache limit (inline MB)
+    //   Other storage   = upload / convert / thumbs / previews
+    //   Swipe row → clear; sizes whole KB/MB/GB
+
+
+    // MARK: - Send one video (compress on)
+
+    func sendCompressedVideo() {
+        // 1. Original → upload/
+        // 2. Prepare:
+        //      convert miss → encode into upload/ + STORE convert/
+        //      convert-HIT  → copy into upload/
+        // 3. PUT from ShareItem.filePath (under upload/)
+        // 4. PROPFIND OK → promote copy → download/
+        // 5. Success → wipe upload/ + thumbs/; convert/ kept
+    }
+
+
+    // MARK: - Open attachment in chat
+
+    func openAttachment() {
+        // download-HIT   size + remote mtime match → open local
+        //                bump contentAccessDate (LRU)
+        // download-STALE mismatch → delete local, re-download
+        // Bubble preview = server URL → SDImageCache (not thumbs/)
+    }
+
+
+    // MARK: - Extra rules
+
+    // Scratch idle launch: skip while .upload-session fresh;
+    //   else remove files older than 30 min
+    // Cancel after PUT: PROPFIND / folder-retry / post
+    //   re-check mediaFlowCancelled
+    // Atomic writes: ImageIO + convert-STORE via temp sibling
+    // Staging: no full-file map for videos or files > 48 MB
+    // Staging names: lastPathComponent only; reject . / ..
+    // Folder retry: PROPFIND exist → ready; 404 → create
+
+
+    // MARK: - Logs
+
+    // Grep: MediaUploadTrace:
+    //   CACHE download-HIT|MISS|STALE|OK|FAIL
+    //   CACHE convert-HIT|STORE
+    //   CACHE promote / purge / scratch-clear
+    // Timestamps UTC (…Z). Lines tagged [bBUILD].
+    """#
 }

@@ -756,6 +756,7 @@
 				CurrentUserAbsence.swift,
 				MediaUploadDebugSettings.swift,
 				MediaUploadDiskStore.swift,
+				MediaUploadHaptics.swift,
 				MediaUploadPreprocessor.swift,
 				MediaUploadProgressAlert.swift,
 				MediaUploadTrace.swift,

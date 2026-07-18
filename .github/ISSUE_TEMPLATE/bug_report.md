@@ -25,7 +25,7 @@ Tell us what happens instead
 
 **iOS version:** 10/…
 
-**Talk version:** 11.1.1
+**SumbaChat version / build:** 24.0.x (bNN)
 
 ## Server information
 

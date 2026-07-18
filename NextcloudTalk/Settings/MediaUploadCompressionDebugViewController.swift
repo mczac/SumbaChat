@@ -1,6 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -182,7 +181,7 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         switch Section(rawValue: section)! {
         case .engine:
             return NSLocalizedString(
-                "Presets use Apple export presets. Bitrate uses AVAssetWriter (rate, max size, edge, FPS). Multiple videos encode one-at-a-time (Telegram-style); Bitrate batches use a lower max-edge cap for memory.",
+                "Presets use Apple export presets. Bitrate uses AVAssetWriter (rate, max size, edge, FPS). Multiple videos encode one at a time; Bitrate batches use a lower max-edge cap for memory.",
                 comment: "Footer under video engine picker in Media Compression Settings"
             )
         case .caps:

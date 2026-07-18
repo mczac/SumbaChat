@@ -1,11 +1,10 @@
 //
-// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
 import AVFoundation
-import ImageIO          
+import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
@@ -16,15 +15,14 @@ import UniformTypeIdentifiers
     case chooseOnUpload = 2
 }
 
-/// Explicit compression strength (Choose on upload, or resolved Automatic level).
-/// Raw values: none=0, low=1, medium=2, high=3 (Build 9; replaces moderate=1).
+/// Compression strength for Choose on upload, or the level Automatic resolved to.
 @objc public enum MediaUploadCompressionLevel: Int {
     case none = 0
     case low = 1
     case medium = 2
     case high = 3
 
-    /// Legacy name used before Build 9.
+    /// Older name for `.medium` (kept for callers that still use it).
     public static var moderate: MediaUploadCompressionLevel { .medium }
 }
 

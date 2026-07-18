@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2023 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursorov and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -1628,15 +1628,22 @@ import Toast
     // MARK: - ShareConfirmationViewController delegate & helper
 
     public func shareConfirmationViewControllerDidFail(_ viewController: ShareConfirmationViewController) {
-        self.dismiss(animated: true) {
+        let afterDismiss = {
             if viewController.forwardingMessage {
                 NotificationPresenter.shared().present(text: NSLocalizedString("Failed to forward message", comment: ""), dismissAfterDelay: 5.0, includedStyle: .error)
             }
         }
+        // Send may already have dismissed the compose sheet to host the upload HUD on chat.
+        if viewController.navigationController?.presentingViewController != nil
+            || viewController.presentingViewController != nil {
+            self.dismiss(animated: true, completion: afterDismiss)
+        } else {
+            afterDismiss()
+        }
     }
 
     public func shareConfirmationViewControllerDidFinish(_ viewController: ShareConfirmationViewController) {
-        self.dismiss(animated: true) {
+        let afterDismiss = {
             if viewController.forwardingMessage {
                 var userInfo: [String: String] = [:]
                 userInfo["token"] = viewController.room.token
@@ -1644,11 +1651,20 @@ import Toast
                 NotificationCenter.default.post(name: .NCChatViewControllerForwardNotification, object: self, userInfo: userInfo)
             }
         }
+        if viewController.navigationController?.presentingViewController != nil
+            || viewController.presentingViewController != nil {
+            self.dismiss(animated: true, completion: afterDismiss)
+        } else {
+            afterDismiss()
+        }
     }
 
     public func shareConfirmationViewControllerDidCancel(_ viewController: ShareConfirmationViewController) {
         self.setChatMessage(viewController.textView.text)
-        self.dismiss(animated: true)
+        if viewController.navigationController?.presentingViewController != nil
+            || viewController.presentingViewController != nil {
+            self.dismiss(animated: true)
+        }
     }
 
     internal func createShareConfirmationViewController() -> (shareConfirmationVC: ShareConfirmationViewController, navController: NCNavigationController)? {
