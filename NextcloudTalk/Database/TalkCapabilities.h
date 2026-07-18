@@ -19,12 +19,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property BOOL attachmentsAllowed;
 @property NSString *attachmentsFolder;
 @property BOOL conversationSubfoldersEnabled;
-@property BOOL uploadCompressionEnabled;
-@property BOOL imageCompressionEnabled;
-@property NSInteger imageMaxDimension;
-@property NSInteger imageJPEGQuality;
-@property BOOL videoCompressionEnabled;
-@property NSString *videoCompressionPreset;
 @property BOOL readStatusPrivacy;
 @property BOOL typingPrivacy;
 @property BOOL callEnabled;

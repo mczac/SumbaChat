@@ -7,7 +7,7 @@
 
 #import "TalkAccount.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 NSString *const kCallParticipantCellIdentifier = @"CallParticipantCellIdentifier";
 NSString *const kCallParticipantCellNibName = @"CallParticipantViewCell";

@@ -9,7 +9,7 @@
 
 #import "TalkAccount.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface NCSignalingController()
 {

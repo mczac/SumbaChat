@@ -6,7 +6,7 @@
 #import "NCThread.h"
 
 #import "NCChatMessage.h"
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface NCThread () {
     NCChatMessage *firstMessageFromDict;

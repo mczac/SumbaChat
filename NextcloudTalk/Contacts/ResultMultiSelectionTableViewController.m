@@ -10,7 +10,7 @@
 #import "TalkAccount.h"
 #import "PlaceholderView.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface ResultMultiSelectionTableViewController ()
 {

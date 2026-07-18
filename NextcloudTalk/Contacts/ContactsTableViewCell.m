@@ -6,7 +6,7 @@
 #import "ContactsTableViewCell.h"
 #import "NCAppBranding.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 NSString *const kContactCellIdentifier = @"ContactCellIdentifier";
 NSString *const kContactsTableCellNibName = @"ContactsTableViewCell";

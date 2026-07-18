@@ -17,7 +17,7 @@
 #import "ShareTableViewCell.h"
 #import "NCKeyChainController.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface ShareViewController () <UISearchControllerDelegate, UISearchResultsUpdating, ShareConfirmationViewControllerDelegate>
 {

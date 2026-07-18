@@ -25,7 +25,7 @@ This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstr
 ## Development setup
 
 1. Clone this repository and run `pod install`.
-2. Open `NextcloudTalk.xcworkspace` in Xcode (workspace/project filenames still follow the upstream layout).
+2. Open `SumbaChat.xcworkspace` in Xcode. Upstream source still lives under the `NextcloudTalk/` directory (original filenames kept for tracking).
 3. Copy local deployment hosts:
 
    ```bash
@@ -57,8 +57,8 @@ WebRTC builds come from [nextcloud-releases/talk-clients-webrtc](https://github.
 Integration tests expect a Nextcloud + Talk instance. Upstream provides `start-instance-for-tests.sh` to bring up Docker for that purpose. Then:
 
 ```bash
-xcodebuild test -workspace NextcloudTalk.xcworkspace \
-    -scheme "NextcloudTalk" \
+xcodebuild test -workspace SumbaChat.xcworkspace \
+    -scheme "SumbaChat" \
     -destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
     -test-iterations 3 \
     -retry-tests-on-failure

@@ -7,7 +7,7 @@
 #import <MobileCoreServices/MobileCoreServices.h>
 
 #import "ShareItemController.h"
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface ShareItemController ()
 

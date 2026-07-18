@@ -8,7 +8,7 @@ on:
     paths:
       - '.github/workflows/**'
       - Podfile
-      - NextcloudTalk.xcodeproj/**
+      - SumbaChat.xcodeproj/**
       - NextcloudTalk/**
       - NextcloudTalkTests/**
       - NotificationServiceExtension/**
@@ -23,11 +23,11 @@ permissions:
   contents: read
 
 env:
-  WORKSPACE: NextcloudTalk.xcworkspace
+  WORKSPACE: SumbaChat.xcworkspace
   DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
   SIMULATOR_MODEL: iPhone 17
   SIMULATOR_VERSION: "26.5"
-  SCHEME: NextcloudTalk
+  SCHEME: SumbaChat
   XCODE_VERSION: "26.5"
 
 jobs:
@@ -73,7 +73,7 @@ jobs:
       with:
         xcode-version: ${{ env.XCODE_VERSION }}
 
-    - name: Build NextcloudTalk iOS for testing
+    - name: Build SumbaChat iOS for testing
       run: |
         set -o pipefail && \
         xcodebuild build-for-testing \

@@ -11,7 +11,7 @@
 #import "ScreenCapturer.h"
 #import "SocketConnection.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 const NSUInteger kMaxReadLength = 10 * 1024;
 

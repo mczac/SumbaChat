@@ -16,8 +16,8 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
                BuildableName = "SumbaChat.app"
-               BlueprintName = "NextcloudTalk"
-               ReferencedContainer = "container:NextcloudTalk.xcodeproj">
+               BlueprintName = "SumbaChat"
+               ReferencedContainer = "container:SumbaChat.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,7 +45,7 @@
                BlueprintIdentifier = "1FD8AD892A3A162100787C16"
                BuildableName = "NextcloudTalkUITests.xctest"
                BlueprintName = "NextcloudTalkUITests"
-               ReferencedContainer = "container:NextcloudTalk.xcodeproj">
+               ReferencedContainer = "container:SumbaChat.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -55,7 +55,7 @@
                BlueprintIdentifier = "1F6D8C2F2B2E3756004376B8"
                BuildableName = "NextcloudTalkTests.xctest"
                BlueprintName = "NextcloudTalkTests"
-               ReferencedContainer = "container:NextcloudTalk.xcodeproj">
+               ReferencedContainer = "container:SumbaChat.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -77,8 +77,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
             BuildableName = "SumbaChat.app"
-            BlueprintName = "NextcloudTalk"
-            ReferencedContainer = "container:NextcloudTalk.xcodeproj">
+            BlueprintName = "SumbaChat"
+            ReferencedContainer = "container:SumbaChat.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -94,8 +94,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2C05747C1EDD9E8E00D9E7F2"
             BuildableName = "SumbaChat.app"
-            BlueprintName = "NextcloudTalk"
-            ReferencedContainer = "container:NextcloudTalk.xcodeproj">
+            BlueprintName = "SumbaChat"
+            ReferencedContainer = "container:SumbaChat.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

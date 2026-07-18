@@ -15,7 +15,7 @@ def main_dependencies
   pod 'MobileVLCKit', '~> 3.5.0'
 end
 
-target "NextcloudTalk" do
+target "SumbaChat" do
   main_dependencies
 
   target 'NextcloudTalkTests' do

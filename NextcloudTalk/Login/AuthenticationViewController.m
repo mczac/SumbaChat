@@ -6,7 +6,7 @@
 #import "AuthenticationViewController.h"
 
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 #import "CCCertificate.h"
 #import "NCAppBranding.h"

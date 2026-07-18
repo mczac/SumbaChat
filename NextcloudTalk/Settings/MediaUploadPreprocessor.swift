@@ -80,13 +80,6 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Kept for Realm/capabilities compatibility; uploads no longer use server values.
-    @objc(initWithTalkCapabilities:)
-    public convenience init(talkCapabilities: TalkCapabilities) {
-        _ = talkCapabilities
-        self.init(level: .none)
-    }
-
     public init(enabled: Bool,
                 imageEnabled: Bool,
                 imageMaxDimension: Int,

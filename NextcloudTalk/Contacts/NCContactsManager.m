@@ -11,7 +11,7 @@
 #import "ABContact.h"
 #import "NCContact.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @interface NCContactsManager ()
 

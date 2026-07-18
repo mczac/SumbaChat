@@ -8,7 +8,7 @@
 #import <CommonCrypto/CommonDigest.h>
 
 #import "NCAppBranding.h"
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @import UICKeyChainStore;
 

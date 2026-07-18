@@ -44,29 +44,16 @@ user **Upload Media** setting — not by server capabilities.
 
 Automatic never skips compression for files under 16 MB (avoids large RAW/HEIC near the cap). WhatsApp-style: standard quality always recompresses; 16 MB is an escalation cap, not a skip threshold.
 
-## Server capability contract (stored, not applied on upload)
+## Remote settings (future)
 
-The app still parses and stores `spreed.config.attachments.upload-compression`
-from capabilities (hash-change refresh unchanged) so the server option remains
-available for other clients or future use. **iOS uploads ignore those values**
-and use the user Upload Media preference only.
+Compression is **local only** (Settings + Debug profiles). The old
+`spreed.config.attachments.upload-compression` fields are no longer stored in
+Realm or applied on upload.
 
-```json
-{
-  "upload-compression": {
-    "enabled": true,
-    "images": {
-      "enabled": true,
-      "max-dimension": 1280,
-      "jpeg-quality": 45
-    },
-    "videos": {
-      "enabled": true,
-      "preset": "low"
-    }
-  }
-}
-```
+Talk config hash refresh (`x-nextcloud-talk-hash` → capabilities reload) still
+runs as usual. When we introduce remote SumbaChat client knobs, apply them in
+`MediaUploadRemoteConfig.applyIfPresent(from:)` — that hook is called on every
+capabilities refresh, including hash updates.
 
 ## Preparing media HUD
 

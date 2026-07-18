@@ -19,7 +19,7 @@
 #import "NCIntentController.h"
 #import "TalkAccount.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @implementation NCIntentController
 

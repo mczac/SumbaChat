@@ -6,7 +6,7 @@
 #import "NCRoom.h"
 
 #import "TalkAccount.h"
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 NSString * const NCRoomObjectTypeFile                   = @"file";
 NSString * const NCRoomObjectTypeSharePassword          = @"share:password";

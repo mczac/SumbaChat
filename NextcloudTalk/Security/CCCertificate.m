@@ -7,7 +7,7 @@
 
 #import "NCAppBranding.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 @implementation CCCertificate
 

@@ -5,7 +5,7 @@
 
 import XCTest
 import Foundation
-@testable import NextcloudTalk
+@testable import SumbaChat
 
 enum TestCaseError: Error {
     case expectedValueNotFound

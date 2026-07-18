@@ -4,7 +4,7 @@
 //
 
 import XCTest
-@testable import NextcloudTalk
+@testable import SumbaChat
 
 /// Simulates iOS 18 Photos / Share Extension staging edge cases without a device.
 /// Covers the same ShareItemController path used by:

@@ -7,7 +7,7 @@
 
 #import "NCAppBranding.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 NSInteger const kChatMessageGroupTimeDifference = 300;
 

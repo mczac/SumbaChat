@@ -4,7 +4,7 @@
 //
 
 import XCTest
-@testable import NextcloudTalk
+@testable import SumbaChat
 
 final class UnitMentionSuggestionTest: XCTestCase {
 

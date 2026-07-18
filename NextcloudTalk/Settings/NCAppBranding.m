@@ -11,7 +11,7 @@
 #import "ServerCapabilities.h"
 #import "FederatedCapabilities.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 // Local hosts live in gitignored NCAppBrandingLocal.h (copy from *.example.h).
 #if __has_include("NCAppBrandingLocal.h")

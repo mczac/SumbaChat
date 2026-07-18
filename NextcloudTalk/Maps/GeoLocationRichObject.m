@@ -5,7 +5,7 @@
 
 #import "GeoLocationRichObject.h"
 
-#import "NextcloudTalk-Swift.h"
+#import "SumbaChat-Swift.h"
 
 NSString * const GeoLocationRichObjectType = @"geo-location";
 
