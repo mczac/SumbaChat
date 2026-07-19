@@ -179,6 +179,13 @@ enum MediaUploadVideoWriter {
             let reader = try AVAssetReader(asset: asset)
             let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .mp4)
             writer.shouldOptimizeForNetworkUse = true
+            // Must be set before startWriting — Writer does not inherit source metadata.
+            let preserved = Self.captureMetadataItems(from: asset)
+            if !preserved.isEmpty {
+                writer.metadata = preserved
+                MediaUploadTrace.logSync(String(format: "WRITER metadata preserved %d item(s) for %@",
+                                                preserved.count, sourceURL.lastPathComponent))
+            }
 
             // Prefer decoder output at encode size — avoids full-res frame peaks even when scale ≈ 1.
             let readerVideoSettings: [String: Any] = [
@@ -376,6 +383,78 @@ enum MediaUploadVideoWriter {
             NCLog.log("MediaUploadVideoWriter: \(error.localizedDescription)")
             completion(false)
         }
+    }
+
+    /// Location + creation date (and light camera identity) from the source movie.
+    /// Loads metadata keys if needed — file-based assets often still have empty `commonMetadata`
+    /// until `loadValuesAsynchronously` finishes.
+    private static func captureMetadataItems(from asset: AVAsset) -> [AVMetadataItem] {
+        let keys = ["commonMetadata", "metadata", "availableMetadataFormats"]
+        let group = DispatchGroup()
+        group.enter()
+        asset.loadValuesAsynchronously(forKeys: keys) {
+            group.leave()
+        }
+        _ = group.wait(timeout: .now() + 2.0)
+
+        var result: [AVMetadataItem] = []
+        var seen = Set<String>()
+
+        func appendIfWanted(_ item: AVMetadataItem) {
+            guard wantsCaptureMetadata(item) else { return }
+            let id = item.identifier?.rawValue
+                ?? "\(item.keySpace?.rawValue ?? "")|\(String(describing: item.key))"
+            guard !seen.contains(id) else { return }
+            guard item.value != nil
+                    || item.dataValue != nil
+                    || item.stringValue != nil
+                    || item.dateValue != nil else { return }
+            seen.insert(id)
+            result.append(item)
+        }
+
+        for item in asset.commonMetadata {
+            appendIfWanted(item)
+        }
+        for item in asset.metadata {
+            appendIfWanted(item)
+        }
+        for format in asset.availableMetadataFormats {
+            for item in asset.metadata(forFormat: format) {
+                appendIfWanted(item)
+            }
+        }
+        return result
+    }
+
+    private static func wantsCaptureMetadata(_ item: AVMetadataItem) -> Bool {
+        if let common = item.commonKey {
+            switch common {
+            case .commonKeyCreationDate, .commonKeyLocation, .commonKeyMake, .commonKeyModel:
+                return true
+            default:
+                break
+            }
+        }
+        if let identifier = item.identifier {
+            switch identifier {
+            case .commonIdentifierCreationDate,
+                 .commonIdentifierLocation,
+                 .commonIdentifierMake,
+                 .commonIdentifierModel,
+                 .quickTimeMetadataCreationDate,
+                 .quickTimeMetadataLocationISO6709,
+                 .quickTimeMetadataLocationName,
+                 .quickTimeMetadataMake,
+                 .quickTimeMetadataModel,
+                 .quickTimeUserDataCreationDate,
+                 .quickTimeUserDataLocationISO6709:
+                return true
+            default:
+                break
+            }
+        }
+        return false
     }
 
     private static func orientedSize(for track: AVAssetTrack) -> CGSize {

@@ -98,6 +98,8 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
     // MemoryGate: ~120 MB free in-app / ~80 MB in Share Extension
     //   bails early if free memory plateaus
     // Multi-video Manual may lower edgeCap (e.g. 640)
+    // Writer: copy location + creation date onto AVAssetWriter.metadata
+    // ExportSession: keep default source metadata (no forSharing filter)
     // Keep original if output not smaller
     // Success → convert cache; after PUT → promote to download/
 

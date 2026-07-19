@@ -709,6 +709,8 @@ import UniformTypeIdentifiers
                 exportSession.outputURL = destinationURL
                 exportSession.outputFileType = .mp4
                 exportSession.shouldOptimizeForNetworkUse = true
+                // Default already keeps source metadata; do not apply forSharing (that strips location).
+                exportSession.metadataItemFilter = nil
 
                 final class ProgressPollState: @unchecked Sendable {
                     var active = true
