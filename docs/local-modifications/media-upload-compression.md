@@ -55,7 +55,7 @@ runs as usual. SumbaChat client knobs are read from `spreed.config.sumbachat-cli
 via `SumbaChatClientConfig` (hooked from `MediaUploadRemoteConfig.applyIfPresent`):
 
 ```json
-{ "minIosBuild": 30, "latestIosBuild": 35, "app": "1234567890" }
+{ "minIosBuild": 30, "latestIosBuild": 36, "app": "1234567890" }
 ```
 
 - `build < minIosBuild` → non-dismissible Update alert (App Store / `app` URL)

@@ -15,7 +15,7 @@ extension Notification.Name {
 ///
 /// Example:
 /// ```json
-/// { "minIosBuild": 30, "latestIosBuild": 35, "app": "1234567890" }
+/// { "minIosBuild": 30, "latestIosBuild": 36, "app": "1234567890" }
 /// ```
 /// `app` may be an App Store numeric id or a full `https://` / `itms-apps://` URL.
 enum SumbaChatClientConfig {
