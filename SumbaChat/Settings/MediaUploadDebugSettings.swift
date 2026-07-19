@@ -19,13 +19,17 @@ import UniformTypeIdentifiers
 @objcMembers public final class MediaUploadProfileConfig: NSObject, Codable {
     public var imageMaxDimension: Int
     public var imageJPEGQuality: Int
-    /// Target total media bitrate for Writer, in **megabits per second** (Mbps).
+    /// Target total media bitrate for Writer (video + audio), in **megabits per second** (Mbps).
     public var videoRateMbps: Double
     public var videoMaxBytes: Int64
     public var videoMaxEdge: Int
     public var videoFPS: Double
     /// ExportSession preset key: low, medium, high, 480p, 540p, 720p, 1080p, 2160p.
     public var exportPreset: String
+    /// Writer AAC target bitrate (kbps). Reserved from `videoRateMbps` before H.264.
+    public var audioBitrateKbps: Int
+    /// Writer AAC channel count (1 = mono, 2 = stereo).
+    public var audioChannels: Int
 
     private enum CodingKeys: String, CodingKey {
         case imageMaxDimension
@@ -37,6 +41,8 @@ import UniformTypeIdentifiers
         case videoMaxEdge
         case videoFPS
         case exportPreset
+        case audioBitrateKbps
+        case audioChannels
     }
 
     public init(imageMaxDimension: Int,
@@ -45,7 +51,9 @@ import UniformTypeIdentifiers
                 videoMaxBytes: Int64,
                 videoMaxEdge: Int,
                 videoFPS: Double,
-                exportPreset: String) {
+                exportPreset: String,
+                audioBitrateKbps: Int,
+                audioChannels: Int) {
         self.imageMaxDimension = imageMaxDimension
         self.imageJPEGQuality = imageJPEGQuality
         self.videoRateMbps = videoRateMbps
@@ -53,6 +61,8 @@ import UniformTypeIdentifiers
         self.videoMaxEdge = videoMaxEdge
         self.videoFPS = videoFPS
         self.exportPreset = exportPreset
+        self.audioBitrateKbps = Self.clampedAudioBitrateKbps(audioBitrateKbps)
+        self.audioChannels = Self.clampedAudioChannels(audioChannels)
     }
 
     public required convenience init(from decoder: Decoder) throws {
@@ -71,13 +81,18 @@ import UniformTypeIdentifiers
         let videoMaxEdge = try c.decode(Int.self, forKey: .videoMaxEdge)
         let videoFPS = try c.decode(Double.self, forKey: .videoFPS)
         let exportPreset = try c.decode(String.self, forKey: .exportPreset)
+        // Older App Group JSON had no audio knobs — land on a balanced mid default.
+        let audioBitrateKbps = try c.decodeIfPresent(Int.self, forKey: .audioBitrateKbps) ?? 64
+        let audioChannels = try c.decodeIfPresent(Int.self, forKey: .audioChannels) ?? 2
         self.init(imageMaxDimension: imageMaxDimension,
                   imageJPEGQuality: imageJPEGQuality,
                   videoRateMbps: videoRateMbps,
                   videoMaxBytes: videoMaxBytes,
                   videoMaxEdge: videoMaxEdge,
                   videoFPS: videoFPS,
-                  exportPreset: exportPreset)
+                  exportPreset: exportPreset,
+                  audioBitrateKbps: audioBitrateKbps,
+                  audioChannels: audioChannels)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -89,6 +104,21 @@ import UniformTypeIdentifiers
         try c.encode(videoMaxEdge, forKey: .videoMaxEdge)
         try c.encode(videoFPS, forKey: .videoFPS)
         try c.encode(exportPreset, forKey: .exportPreset)
+        try c.encode(audioBitrateKbps, forKey: .audioBitrateKbps)
+        try c.encode(audioChannels, forKey: .audioChannels)
+    }
+
+    public static func clampedAudioBitrateKbps(_ value: Int) -> Int {
+        min(192, max(16, value))
+    }
+
+    public static func clampedAudioChannels(_ value: Int) -> Int {
+        value >= 2 ? 2 : 1
+    }
+
+    /// AAC bits/sec reserved from the total Writer rate budget.
+    public var audioBitsPerSecond: Int {
+        Self.clampedAudioBitrateKbps(audioBitrateKbps) * 1000
     }
 
     public static var defaultLow: MediaUploadProfileConfig {
@@ -98,7 +128,9 @@ import UniformTypeIdentifiers
                                  videoMaxBytes: 100 * 1024 * 1024,
                                  videoMaxEdge: 1920,
                                  videoFPS: 30,
-                                 exportPreset: "720p")
+                                 exportPreset: "720p",
+                                 audioBitrateKbps: 96,
+                                 audioChannels: 2)
     }
 
     public static var defaultMedium: MediaUploadProfileConfig {
@@ -108,7 +140,9 @@ import UniformTypeIdentifiers
                                  videoMaxBytes: 40 * 1024 * 1024,
                                  videoMaxEdge: 1280,
                                  videoFPS: 30,
-                                 exportPreset: "540p")
+                                 exportPreset: "540p",
+                                 audioBitrateKbps: 64,
+                                 audioChannels: 2)
     }
 
     public static var defaultHigh: MediaUploadProfileConfig {
@@ -118,10 +152,12 @@ import UniformTypeIdentifiers
                                  videoMaxBytes: 12 * 1024 * 1024,
                                  videoMaxEdge: 640,
                                  videoFPS: 24,
-                                 exportPreset: "low")
+                                 exportPreset: "low",
+                                 audioBitrateKbps: 32,
+                                 audioChannels: 1)
     }
 
-    /// Copy with a lower encode max-edge (batch jetsam mitigation). Rate/FPS unchanged.
+    /// Copy with a lower encode max-edge (batch jetsam mitigation). Rate/FPS/audio unchanged.
     public func cappingVideoMaxEdge(_ cap: Int) -> MediaUploadProfileConfig {
         let edge = max(320, min(videoMaxEdge, cap))
         return MediaUploadProfileConfig(imageMaxDimension: imageMaxDimension,
@@ -130,7 +166,9 @@ import UniformTypeIdentifiers
                                         videoMaxBytes: videoMaxBytes,
                                         videoMaxEdge: edge,
                                         videoFPS: videoFPS,
-                                        exportPreset: exportPreset)
+                                        exportPreset: exportPreset,
+                                        audioBitrateKbps: audioBitrateKbps,
+                                        audioChannels: audioChannels)
     }
 }
 
@@ -157,6 +195,8 @@ import UniformTypeIdentifiers
     public var low: MediaUploadProfileConfig
     public var medium: MediaUploadProfileConfig
     public var high: MediaUploadProfileConfig
+    /// Bumped when default Writer AAC knobs change; migrates older App Group JSON once.
+    public var audioSettingsVersion: Int
 
     private enum CodingKeys: String, CodingKey {
         case videoEngineRaw
@@ -167,7 +207,10 @@ import UniformTypeIdentifiers
         case low
         case medium
         case high
+        case audioSettingsVersion
     }
+
+    private static let currentAudioSettingsVersion = 1
 
     public var videoEngine: MediaUploadVideoEngine {
         get { MediaUploadVideoEngine(rawValue: videoEngineRaw) ?? .assetWriter }
@@ -185,7 +228,8 @@ import UniformTypeIdentifiers
                 automaticVideoEstimateMarginPercent: Double = MediaUploadDebugSettings.defaultAutomaticVideoEstimateMarginPercent,
                 low: MediaUploadProfileConfig = .defaultLow,
                 medium: MediaUploadProfileConfig = .defaultMedium,
-                high: MediaUploadProfileConfig = .defaultHigh) {
+                high: MediaUploadProfileConfig = .defaultHigh,
+                audioSettingsVersion: Int = MediaUploadDebugSettings.currentAudioSettingsVersion) {
         self.videoEngineRaw = videoEngineRaw
         self.perFileMaxBytes = perFileMaxBytes
         self.packageMaxBytes = packageMaxBytes
@@ -194,6 +238,7 @@ import UniformTypeIdentifiers
         self.low = low
         self.medium = medium
         self.high = high
+        self.audioSettingsVersion = audioSettingsVersion
     }
 
     public required convenience init(from decoder: Decoder) throws {
@@ -209,6 +254,7 @@ import UniformTypeIdentifiers
         let low = try c.decodeIfPresent(MediaUploadProfileConfig.self, forKey: .low) ?? .defaultLow
         let medium = try c.decodeIfPresent(MediaUploadProfileConfig.self, forKey: .medium) ?? .defaultMedium
         let high = try c.decodeIfPresent(MediaUploadProfileConfig.self, forKey: .high) ?? .defaultHigh
+        let audioSettingsVersion = try c.decodeIfPresent(Int.self, forKey: .audioSettingsVersion) ?? 0
         self.init(videoEngineRaw: videoEngineRaw,
                   perFileMaxBytes: perFileMaxBytes,
                   packageMaxBytes: packageMaxBytes,
@@ -216,7 +262,22 @@ import UniformTypeIdentifiers
                   automaticVideoEstimateMarginPercent: videoMargin,
                   low: low,
                   medium: medium,
-                  high: high)
+                  high: high,
+                  audioSettingsVersion: audioSettingsVersion)
+        if audioSettingsVersion < Self.currentAudioSettingsVersion {
+            applyDefaultAudioSettings()
+            self.audioSettingsVersion = Self.currentAudioSettingsVersion
+        }
+    }
+
+    /// One-shot migration: apply built-in AAC defaults per Low / Medium / High.
+    private func applyDefaultAudioSettings() {
+        low.audioBitrateKbps = MediaUploadProfileConfig.defaultLow.audioBitrateKbps
+        low.audioChannels = MediaUploadProfileConfig.defaultLow.audioChannels
+        medium.audioBitrateKbps = MediaUploadProfileConfig.defaultMedium.audioBitrateKbps
+        medium.audioChannels = MediaUploadProfileConfig.defaultMedium.audioChannels
+        high.audioBitrateKbps = MediaUploadProfileConfig.defaultHigh.audioBitrateKbps
+        high.audioChannels = MediaUploadProfileConfig.defaultHigh.audioChannels
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -229,6 +290,7 @@ import UniformTypeIdentifiers
         try c.encode(low, forKey: .low)
         try c.encode(medium, forKey: .medium)
         try c.encode(high, forKey: .high)
+        try c.encode(audioSettingsVersion, forKey: .audioSettingsVersion)
     }
 
     /// Clamps margin to 0…50%.
@@ -257,7 +319,7 @@ import UniformTypeIdentifiers
     /// Compact one-line dump for NCLog when settings are saved or reloaded.
     public var summaryForLog: String {
         func profileLine(_ name: String, _ c: MediaUploadProfileConfig) -> String {
-            String(format: "%@[q=%d imgEdge=%d rate=%.2fMbps vidMax=%.1fMB vidEdge=%d fps=%.0f preset=%@]",
+            String(format: "%@[q=%d imgEdge=%d rate=%.2fMbps vidMax=%.1fMB vidEdge=%d fps=%.0f preset=%@ aac=%dk/%dch]",
                    name,
                    c.imageJPEGQuality,
                    c.imageMaxDimension,
@@ -265,7 +327,9 @@ import UniformTypeIdentifiers
                    Double(c.videoMaxBytes) / 1_048_576.0,
                    c.videoMaxEdge,
                    c.videoFPS,
-                   c.exportPreset)
+                   c.exportPreset,
+                   c.audioBitrateKbps,
+                   c.audioChannels)
         }
         return String(format: "engine=%@ perFile=%.1fMB package=%.1fMB photoMargin=%.0f%% videoMargin=%.0f%% %@ %@ %@",
                       Self.engineName(videoEngineRaw),
@@ -332,6 +396,12 @@ import UniformTypeIdentifiers
             if before.exportPreset != after.exportPreset {
                 parts.append("\(name).preset: \(before.exportPreset) → \(after.exportPreset)")
             }
+            if before.audioBitrateKbps != after.audioBitrateKbps {
+                parts.append("\(name).audioKbps: \(before.audioBitrateKbps) → \(after.audioBitrateKbps)")
+            }
+            if before.audioChannels != after.audioChannels {
+                parts.append("\(name).audioCh: \(before.audioChannels) → \(after.audioChannels)")
+            }
         }
         appendProfileDiff("low", previous.low, low)
         appendProfileDiff("med", previous.medium, medium)
@@ -388,10 +458,13 @@ import UniformTypeIdentifiers
         return (Double(fileBytes) * 8.0) / durationSeconds / 1_000_000.0
     }
 
-    /// Rough video-only Mbps after subtracting typical AAC.
-    public static func approximateSourceVideoMbps(fileBytes: Int64, durationSeconds: Double) -> Double {
+    /// Rough video-only Mbps after subtracting profile (or typical) AAC.
+    public static func approximateSourceVideoMbps(fileBytes: Int64,
+                                                  durationSeconds: Double,
+                                                  audioBitrateKbps: Int = 64) -> Double {
         let total = approximateSourceTotalMbps(fileBytes: fileBytes, durationSeconds: durationSeconds)
-        return max(0.05, total - 0.128)
+        let audioMbps = Double(MediaUploadProfileConfig.clampedAudioBitrateKbps(audioBitrateKbps)) / 1000.0
+        return max(0.05, total - audioMbps)
     }
 
     /// Effective Mbps for Writer: min(profile rate, size-cap → Mbps for this duration).
@@ -491,7 +564,7 @@ import UniformTypeIdentifiers
     }
 
     /// Writer size estimate: `Mbps × duration / 8` (bytes).
-    /// Matches Writer target rate (total file budget) for Manual chip labels.
+    /// Matches Writer target rate (total mux budget: video + profile AAC) for Manual chip labels.
     public static func estimatedWriterVideoBytes(profile: MediaUploadProfileConfig,
                                                  durationSeconds: Double,
                                                  originalSize: Int64) -> Int64 {
@@ -583,7 +656,9 @@ import UniformTypeIdentifiers
         }
 
         let sourceTotalMbps = approximateSourceTotalMbps(fileBytes: original, durationSeconds: duration)
-        let sourceVideoMbps = approximateSourceVideoMbps(fileBytes: original, durationSeconds: duration)
+        let sourceVideoMbps = approximateSourceVideoMbps(fileBytes: original,
+                                                         durationSeconds: duration,
+                                                         audioBitrateKbps: profile.audioBitrateKbps)
         let thresholdBytes = Int64(Double(original) * shrinkEnableMargin)
 
         let willShrink: Bool
@@ -835,8 +910,22 @@ import UniformTypeIdentifiers
             do {
                 let loaded = try JSONDecoder().decode(MediaUploadDebugSettings.self, from: data)
                 let reason = cachedData == nil ? "cold-load" : "disk-changed"
+                // Persist Codable migrations (e.g. Writer AAC defaults) so cold start stays stable.
+                var stored = data
+                if let normalized = try? JSONEncoder().encode(loaded), normalized != data {
+                    UserDefaults.standard.set(normalized, forKey: storageKey)
+                    UserDefaults.standard.synchronize()
+                    if let group = UserDefaults(suiteName: groupIdentifier) {
+                        group.set(normalized, forKey: storageKey)
+                        group.synchronize()
+                    }
+                    stored = normalized
+                    DispatchQueue.global(qos: .utility).async {
+                        NCLog.log("MediaUploadDebugSettings: persisted settings migration \(loaded.summaryForLog)")
+                    }
+                }
                 cached = loaded
-                cachedData = data
+                cachedData = stored
                 let summary = loaded.summaryForLog
                 DispatchQueue.global(qos: .utility).async {
                     NCLog.log("MediaUploadDebugSettings: cache reload (\(reason)) \(summary)")

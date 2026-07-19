@@ -72,7 +72,8 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
     // Debug → Media Compression Settings → Video engine
 
     // 1) Bitrate — AVAssetWriter [default]
-    //    target TOTAL Mbps (video+audio); video ≈ rate×1e6 − 128 kbps
+    //    target TOTAL Mbps (video+audio); video ≈ rate×1e6 − profile AAC kbps
+    //    AAC always re-encoded (PCM→AAC) at profile bitrate/channels / 44.1 kHz
     //    scales to videoMaxEdge (+ batch edgeCap); uses videoFPS
     //    estimate ≈ rateMbps × duration; Writer fail → ExportSession once
 

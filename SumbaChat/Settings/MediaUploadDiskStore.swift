@@ -232,8 +232,11 @@ import UIKit
         let fps = profile?.videoFPS ?? 0
         let preset = profile?.exportPreset ?? ""
         let vidMax = profile?.videoMaxBytes ?? 0
-        return String(format: "lv%ld_%@_q%d_ie%d_r%.3f_ve%d_f%.0f_p%@_vm%lld",
-                      level.rawValue, engine, q, imgEdge, rate, vidEdge, fps, preset, vidMax)
+        let audioKbps = profile?.audioBitrateKbps ?? 0
+        let audioCh = profile?.audioChannels ?? 0
+        return String(format: "lv%ld_%@_q%d_ie%d_r%.3f_ve%d_f%.0f_p%@_vm%lld_a%dk%dc",
+                      level.rawValue, engine, q, imgEdge, rate, vidEdge, fps, preset, vidMax,
+                      audioKbps, audioCh)
     }
 
     /// Stable key for staged file contents (`v2` + SHA256 of samples + size).

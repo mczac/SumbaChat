@@ -40,6 +40,8 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         case videoMaxMB
         case videoMaxEdge
         case videoFPS
+        case audioBitrate
+        case audioChannels
     }
 
     private var profileVideoRowCount: Int {
@@ -181,7 +183,7 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
         switch Section(rawValue: section)! {
         case .engine:
             return NSLocalizedString(
-                "Presets use Apple export presets. Bitrate uses AVAssetWriter (rate, max size, edge, FPS). Multiple videos encode one at a time; Bitrate batches use a lower max-edge cap for memory.",
+                "Presets use Apple export presets. Bitrate uses AVAssetWriter (rate, max size, edge, FPS, AAC bitrate/channels). Multiple videos encode one at a time; Bitrate batches use a lower max-edge cap for memory.",
                 comment: "Footer under video engine picker in Media Compression Settings"
             )
         case .caps:
@@ -367,6 +369,14 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
             case .videoFPS:
                 cell.textLabel?.text = NSLocalizedString("Video FPS", comment: "")
                 cell.detailTextLabel?.text = String(format: "%.0f", profile.videoFPS)
+            case .audioBitrate:
+                cell.textLabel?.text = NSLocalizedString("Audio bitrate", comment: "")
+                cell.detailTextLabel?.text = "\(profile.audioBitrateKbps) kbps"
+            case .audioChannels:
+                cell.textLabel?.text = NSLocalizedString("Audio channels", comment: "")
+                cell.detailTextLabel?.text = profile.audioChannels > 1
+                    ? NSLocalizedString("Stereo", comment: "")
+                    : NSLocalizedString("Mono", comment: "")
             }
         } else {
             cell.textLabel?.text = NSLocalizedString("Video preset", comment: "")
@@ -443,7 +453,7 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                                   values: [0.4, 0.8, 1.0, 1.5, 2.0, 2.5, 3.2, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0],
                                   unit: "Mbps", format: "%.2f",
                                   footer: NSLocalizedString(
-                                    "Target bitrate for AVAssetWriter in megabits per second. Lower is smaller and softer.",
+                                    "Target total bitrate for AVAssetWriter (video + audio) in megabits per second. Audio is reserved first; the rest goes to H.264. Lower is smaller and softer.",
                                     comment: "Footer under video rate picker"
                                   )) { value in
                     var updated = self.settings[keyPath: keyPath]
@@ -487,6 +497,35 @@ final class MediaUploadCompressionDebugViewController: UITableViewController, De
                                   )) { value in
                     var updated = self.settings[keyPath: keyPath]
                     updated.videoFPS = min(60, max(1, value))
+                    self.settings[keyPath: keyPath] = updated
+                    self.persistAndReload()
+                }
+            case .audioBitrate:
+                pushIntChoices(title: "Audio bitrate", current: profile.audioBitrateKbps,
+                               values: [32, 48, 64, 80, 96, 112, 128, 160, 192],
+                               unit: "kbps",
+                               footer: NSLocalizedString(
+                                "AAC bitrate for Writer. Reserved from the total video rate before H.264 encoding. Lower shrinks more.",
+                                comment: "Footer under audio bitrate picker"
+                               )) { value in
+                    var updated = self.settings[keyPath: keyPath]
+                    updated.audioBitrateKbps = MediaUploadProfileConfig.clampedAudioBitrateKbps(value)
+                    self.settings[keyPath: keyPath] = updated
+                    self.persistAndReload()
+                }
+            case .audioChannels:
+                pushChoices(title: NSLocalizedString("Audio channels", comment: ""),
+                            selectedId: profile.audioChannels > 1 ? "2" : "1",
+                            choices: [
+                                ("1", NSLocalizedString("Mono", comment: ""), nil),
+                                ("2", NSLocalizedString("Stereo", comment: ""), nil)
+                            ],
+                            footer: NSLocalizedString(
+                                "AAC channel layout for Writer. Mono is smaller; stereo keeps left/right.",
+                                comment: "Footer under audio channels picker"
+                            )) { id in
+                    var updated = self.settings[keyPath: keyPath]
+                    updated.audioChannels = MediaUploadProfileConfig.clampedAudioChannels(Int(id) ?? 1)
                     self.settings[keyPath: keyPath] = updated
                     self.persistAndReload()
                 }

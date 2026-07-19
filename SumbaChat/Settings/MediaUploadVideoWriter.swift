@@ -178,17 +178,19 @@ enum MediaUploadVideoWriter {
 
         let rateMbps = MediaUploadDebugSettings.effectiveRateMbps(profile: profile, durationSeconds: durationSeconds)
         let totalBitsPerSecond = rateMbps * 1_000_000.0
-        let audioBitsPerSecond = 128_000.0
+        let audioBitsPerSecond = Double(profile.audioBitsPerSecond)
         let videoBitsPerSecond = max(100_000, Int(totalBitsPerSecond - audioBitsPerSecond))
         let fps = max(1, Int(profile.videoFPS.rounded()))
         MediaUploadTrace.logSync(String(format:
-            "WRITER start %@ duration=%.1fs out=%dx%d edge=%d rate=%.2fMbps videoBitrate=%d fps=%d avail=%.0fMB",
+            "WRITER start %@ duration=%.1fs out=%dx%d edge=%d rate=%.2fMbps videoBitrate=%d aac=%dk/%dch fps=%d avail=%.0fMB",
             sourceURL.lastPathComponent,
             durationSeconds,
             width, height,
             profile.videoMaxEdge,
             rateMbps,
             videoBitsPerSecond,
+            profile.audioBitrateKbps,
+            profile.audioChannels,
             fps,
             MediaUploadMemoryGateObjC.availableMegabytes()))
 
@@ -234,17 +236,21 @@ enum MediaUploadVideoWriter {
             }
             writer.add(videoWriterInput)
 
-            // Audio — Telegram-style PCM→AAC (always re-encode). Passthrough without a
-            // sourceFormatHint is rejected for MP4 and we used to ship silent files.
+            // Audio — always Linear PCM → AAC at the profile bitrate so the size budget is honest.
             let sourceHasAudio = !asset.tracks(withMediaType: .audio).isEmpty
             var audioReaderOutput: AVAssetReaderTrackOutput?
             var audioWriterInput: AVAssetWriterInput?
             if let audioTrack = asset.tracks(withMediaType: .audio).first {
-                if let wired = Self.wireAudio(track: audioTrack, reader: reader, writer: writer) {
+                if let wired = Self.wireAudio(track: audioTrack,
+                                              reader: reader,
+                                              writer: writer,
+                                              profile: profile) {
                     audioReaderOutput = wired.readerOutput
                     audioWriterInput = wired.writerInput
-                    MediaUploadTrace.logSync(String(format: "WRITER audio path=%@ %@",
-                                                    wired.pathName, sourceURL.lastPathComponent))
+                    MediaUploadTrace.logSync(String(format: "WRITER audio path=aac kbps=%d ch=%d %@",
+                                                    profile.audioBitrateKbps,
+                                                    profile.audioChannels,
+                                                    sourceURL.lastPathComponent))
                 } else {
                     // Fail the Writer encode so ExportSession can take over — never upload mute.
                     MediaUploadTrace.logSync("WRITER audio FAIL (could not wire) \(sourceURL.lastPathComponent)")
@@ -398,11 +404,12 @@ enum MediaUploadVideoWriter {
                             let outMbps = duration > 0
                                 ? MediaUploadDebugSettings.approximateSourceTotalMbps(fileBytes: compressedSize, durationSeconds: duration) : 0
                             MediaUploadTrace.log(String(format:
-                                "ENCODE video ACTUAL %@ %@ (%.3fMbps) → %@ (%.3fMbps) engine=Writer %dx%d videoBitrate=%d audio=%@",
+                                "ENCODE video ACTUAL %@ %@ (%.3fMbps) → %@ (%.3fMbps) engine=Writer %dx%d videoBitrate=%d aac=%dk audio=%@",
                                 sourceURL.lastPathComponent,
                                 MediaUploadTrace.mb(sourceSize), srcMbps,
                                 MediaUploadTrace.mb(compressedSize), outMbps,
                                 width, height, videoBitsPerSecond,
+                                profile.audioBitrateKbps,
                                 sourceHasAudio ? "yes" : "none"))
                             completion(true)
                         }
@@ -419,41 +426,15 @@ enum MediaUploadVideoWriter {
     private struct WiredAudio {
         let readerOutput: AVAssetReaderTrackOutput
         let writerInput: AVAssetWriterInput
-        let pathName: String
     }
 
-    /// Wire source audio. Matches Telegram's converter: decode PCM → encode AAC for MP4
-    /// (passthrough without a format hint is rejected and used to produce silent uploads).
+    /// Decode source audio to Linear PCM and re-encode AAC at the profile bitrate / channels.
     private static func wireAudio(track audioTrack: AVAssetTrack,
                                   reader: AVAssetReader,
-                                  writer: AVAssetWriter) -> WiredAudio? {
-        let formatHint = audioTrack.formatDescriptions.first.map { $0 as! CMFormatDescription }
-
-        // Optional fast path: copy compressed audio when MP4 accepts it with a format hint.
-        if let formatHint {
-            let passthrough = AVAssetWriterInput(mediaType: .audio,
-                                                 outputSettings: nil,
-                                                 sourceFormatHint: formatHint)
-            passthrough.expectsMediaDataInRealTime = false
-            if writer.canAdd(passthrough) {
-                let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
-                output.alwaysCopiesSampleData = false
-                if reader.canAdd(output) {
-                    writer.add(passthrough)
-                    reader.add(output)
-                    return WiredAudio(readerOutput: output, writerInput: passthrough, pathName: "passthrough")
-                }
-            }
-        }
-
-        // Telegram-style fallback / primary path: Linear PCM → AAC.
-        var channels = 1
-        if let formatHint,
-           let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatHint)?.pointee,
-           asbd.mChannelsPerFrame > 0 {
-            channels = Int(asbd.mChannelsPerFrame)
-        }
-        channels = max(1, min(2, channels))
+                                  writer: AVAssetWriter,
+                                  profile: MediaUploadProfileConfig) -> WiredAudio? {
+        let channels = MediaUploadProfileConfig.clampedAudioChannels(profile.audioChannels)
+        let bitrate = MediaUploadProfileConfig.clampedAudioBitrateKbps(profile.audioBitrateKbps) * 1000
 
         var channelLayout = AudioChannelLayout()
         channelLayout.mChannelLayoutTag = channels > 1
@@ -465,7 +446,7 @@ enum MediaUploadVideoWriter {
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: 44_100.0,
             AVNumberOfChannelsKey: channels,
-            AVEncoderBitRateKey: 128_000,
+            AVEncoderBitRateKey: bitrate,
             AVChannelLayoutKey: channelLayoutData
         ]
         let pcmSettings: [String: Any] = [
@@ -483,7 +464,7 @@ enum MediaUploadVideoWriter {
         guard reader.canAdd(pcmOutput) else { return nil }
         writer.add(aacInput)
         reader.add(pcmOutput)
-        return WiredAudio(readerOutput: pcmOutput, writerInput: aacInput, pathName: "aac")
+        return WiredAudio(readerOutput: pcmOutput, writerInput: aacInput)
     }
 
     /// Location + creation date (and light camera identity) from the source movie.
