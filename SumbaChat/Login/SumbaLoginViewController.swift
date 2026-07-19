@@ -43,7 +43,7 @@ import UIKit
         return imageView
     }()
 
-    /// Keeps the logo a fixed square while the form stack uses `.fill` for fields/buttons.
+    /// Keeps the logo a fixed square while the form stack uses `.fill` for fields.
     private lazy var logoContainer: UIView = {
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -143,7 +143,6 @@ import UIKit
 
     private lazy var copyrightLabel: UILabel = {
         let label = UILabel()
-        label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .preferredFont(forTextStyle: .caption1)
         label.textColor = .tertiaryLabel
         label.textAlignment = .center
@@ -165,8 +164,8 @@ import UIKit
             passwordTextField,
             makeGap(10),
             errorLabel,
-            makeGap(18),
-            loginButton
+            makeGap(24),
+            copyrightLabel
         ])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .vertical
@@ -187,12 +186,10 @@ import UIKit
     override func viewDidLoad() {
         super.viewDidLoad()
         configureView()
-        registerForKeyboardNotifications()
         updateLoginButtonState()
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
         loginTask?.cancel()
         loginSession.invalidateAndCancel()
     }
@@ -211,22 +208,20 @@ import UIKit
 
         view.addSubview(scrollView)
         scrollView.addSubview(formStack)
-        view.addSubview(copyrightLabel)
+        view.addSubview(loginButton)
 
         let frameGuide = scrollView.frameLayoutGuide
         let contentGuide = scrollView.contentLayoutGuide
 
-        // Pin leading/trailing to the content guide (not just centerX) so the
-        // scroll view's content size stays aligned with the screen width.
-        // Keyboard only adjusts contentInset — no logo/spacer compression jump.
+        // Log in rides above the keyboard via keyboardLayoutGuide; form scrolls above it.
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: loginButton.topAnchor, constant: -12),
 
             formStack.topAnchor.constraint(equalTo: contentGuide.topAnchor, constant: 32),
-            formStack.bottomAnchor.constraint(equalTo: contentGuide.bottomAnchor, constant: -24),
+            formStack.bottomAnchor.constraint(equalTo: contentGuide.bottomAnchor, constant: -16),
             formStack.leadingAnchor.constraint(equalTo: contentGuide.leadingAnchor, constant: 20),
             formStack.trailingAnchor.constraint(equalTo: contentGuide.trailingAnchor, constant: -20),
             formStack.widthAnchor.constraint(equalTo: frameGuide.widthAnchor, constant: -40),
@@ -239,11 +234,11 @@ import UIKit
 
             usernameTextField.heightAnchor.constraint(equalToConstant: 52),
             passwordTextField.heightAnchor.constraint(equalToConstant: 52),
-            loginButton.heightAnchor.constraint(equalToConstant: 54),
 
-            copyrightLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            copyrightLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            copyrightLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+            loginButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            loginButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            loginButton.heightAnchor.constraint(equalToConstant: 54),
+            loginButton.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -16)
         ])
 
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
@@ -292,51 +287,6 @@ import UIKit
         field.leftView = container
         field.leftViewMode = .always
         return field
-    }
-
-    private func registerForKeyboardNotifications() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(keyboardWillChangeFrame),
-            name: UIResponder.keyboardWillChangeFrameNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(keyboardWillHide),
-            name: UIResponder.keyboardWillHideNotification,
-            object: nil
-        )
-    }
-
-    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
-            return
-        }
-
-        let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
-        let overlap = max(0, scrollView.frame.maxY - keyboardFrameInView.minY)
-        let keyboardVisible = overlap > 0
-
-        let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
-        let curveRaw = (userInfo[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
-        let options = UIView.AnimationOptions(rawValue: curveRaw << 16)
-
-        UIView.animate(withDuration: duration, delay: 0, options: options) {
-            self.scrollView.contentInset.bottom = overlap
-            self.scrollView.verticalScrollIndicatorInsets.bottom = overlap
-            self.copyrightLabel.alpha = keyboardVisible ? 0 : 1
-        }
-    }
-
-    @objc private func keyboardWillHide(_ notification: Notification) {
-        let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
-        UIView.animate(withDuration: duration) {
-            self.scrollView.contentInset.bottom = 0
-            self.scrollView.verticalScrollIndicatorInsets.bottom = 0
-            self.copyrightLabel.alpha = 1
-        }
     }
 
     @objc private func dismissKeyboard() {

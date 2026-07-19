@@ -44,6 +44,7 @@ enum UserProfileScope {
 }
 
 private let kPreferredFileSorting = "preferredFileSorting"
+private let kPreferredFileSortingAscending = "preferredFileSortingAscending"
 private let kContactSyncEnabled = "contactSyncEnabled"
 private let kDidReceiveCallsFromOldAccount = "receivedCallsFromOldAccount"
 
@@ -364,6 +365,18 @@ public class NCSettingsController: NSObject {
 
     public func setPreferredFileSorting(_ sorting: NCPreferredFileSorting) {
         UserDefaults.standard.set(NSNumber(value: sorting.rawValue), forKey: kPreferredFileSorting)
+    }
+
+    /// Ascending order for the preferred file sort criterion. Default: false for date (newest first), true for name (A–Z).
+    public func isPreferredFileSortingAscending() -> Bool {
+        if UserDefaults.standard.object(forKey: kPreferredFileSortingAscending) == nil {
+            return getPreferredFileSorting() == .alphabeticalSorting
+        }
+        return UserDefaults.standard.bool(forKey: kPreferredFileSortingAscending)
+    }
+
+    public func setPreferredFileSortingAscending(_ ascending: Bool) {
+        UserDefaults.standard.set(ascending, forKey: kPreferredFileSortingAscending)
     }
 
     public func isContactSyncEnabled() -> Bool {

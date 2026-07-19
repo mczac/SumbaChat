@@ -1295,15 +1295,16 @@ import AVFoundation
         let bagChanged = bagKey != self.compressionEstimateBagKey
 
         if bagChanged {
-            // One estimate pass for segment sizes + enablement (avoids 6× MediaUploadHeuristic per level).
-            let totals = MediaUploadPreprocessor.cheapEstimatedByteCounts(forFileURLs: urls)
+            // One estimate pass: label totals + any-item enablement (Send keeps original for non-winners).
+            let bag = MediaUploadPreprocessor.bagCompressionEstimates(forFileURLs: urls)
+            let totals = bag.totals
             estimates = [
                 .none: totals.none,
                 .low: totals.low,
                 .medium: totals.medium,
                 .high: totals.high
             ]
-            enabled = MediaUploadPreprocessor.compressionLevelsUsefulFromEstimates(totals)
+            enabled = bag.enabled
             hasCompressChoice = enabled.contains(.low) || enabled.contains(.medium) || enabled.contains(.high)
 
             self.compressionEstimateBagKey = bagKey
@@ -1328,8 +1329,7 @@ import AVFoundation
                 MediaUploadTrace.mb(totals.high),
                 enabled.map { MediaUploadTrace.levelName($0) }.sorted().joined(separator: ","),
                 MediaUploadTrace.levelName(self.chosenCompressionLevel)))
-            for url in urls {
-                let per = MediaUploadPreprocessor.cheapEstimatedByteCounts(at: url)
+            for (url, per) in zip(urls, bag.perItem) {
                 MediaUploadTrace.log(String(format:
                     "CHIPS item %@ original=%@ est low=%@ med=%@ high=%@",
                     url.lastPathComponent,
@@ -1417,13 +1417,18 @@ import AVFoundation
 
             let isSelected = index == selectedIndex
             let foreground: UIColor
+            let sizeAlpha: CGFloat
             if !isEnabled {
+                // Title and size share the same muted color (sizeAlpha 1 = no extra brightening).
                 foreground = disabledColor
+                sizeAlpha = 1.0
             } else if isSelected {
                 // Selected thumb is brand blue in light and dark.
                 foreground = .white
+                sizeAlpha = 0.95
             } else {
                 foreground = unselectedColor
+                sizeAlpha = 0.72
             }
 
             control.setTitle(nil, forSegmentAt: index)
@@ -1432,7 +1437,7 @@ import AVFoundation
                     levelTitle: levelTitle,
                     sizeTitle: sizeTitle,
                     foreground: foreground,
-                    sizeAlpha: isSelected ? 0.95 : 0.72,
+                    sizeAlpha: sizeAlpha,
                     width: segmentWidth,
                     traits: traits
                 ),
@@ -1486,7 +1491,9 @@ import AVFoundation
         let sizeFont = UIFont.systemFont(ofSize: 10, weight: .medium)
         // Bake resolved colors — dynamic UIColors in bitmaps often flip to the wrong style.
         let titleColor = foreground.resolvedColor(with: traits)
-        let detailColor = titleColor.withAlphaComponent(sizeAlpha)
+        // Multiply alpha (don't replace): disabled titles are already ~0.35; replacing with
+        // sizeAlpha 1.0 was painting sizes fully opaque white.
+        let detailColor = titleColor.withAlphaComponent(titleColor.cgColor.alpha * sizeAlpha)
 
         let text = NSMutableAttributedString()
         text.append(NSAttributedString(string: levelTitle + "\n", attributes: [

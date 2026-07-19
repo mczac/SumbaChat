@@ -116,7 +116,7 @@ import UniformTypeIdentifiers
         value >= 2 ? 2 : 1
     }
 
-    /// AAC bits/sec reserved from the total Writer rate budget.
+    /// AAC bits/sec reserved from the total Writer rate budget (profile target; encode may use less via `min` with source).
     public var audioBitsPerSecond: Int {
         Self.clampedAudioBitrateKbps(audioBitrateKbps) * 1000
     }
@@ -129,7 +129,7 @@ import UniformTypeIdentifiers
                                  videoMaxEdge: 1920,
                                  videoFPS: 30,
                                  exportPreset: "720p",
-                                 audioBitrateKbps: 96,
+                                 audioBitrateKbps: 64,
                                  audioChannels: 2)
     }
 
@@ -153,7 +153,7 @@ import UniformTypeIdentifiers
                                  videoMaxEdge: 640,
                                  videoFPS: 24,
                                  exportPreset: "low",
-                                 audioBitrateKbps: 32,
+                                 audioBitrateKbps: 64,
                                  audioChannels: 1)
     }
 
@@ -210,7 +210,7 @@ import UniformTypeIdentifiers
         case audioSettingsVersion
     }
 
-    private static let currentAudioSettingsVersion = 1
+    private static let currentAudioSettingsVersion = 2
 
     public var videoEngine: MediaUploadVideoEngine {
         get { MediaUploadVideoEngine(rawValue: videoEngineRaw) ?? .assetWriter }
@@ -229,7 +229,7 @@ import UniformTypeIdentifiers
                 low: MediaUploadProfileConfig = .defaultLow,
                 medium: MediaUploadProfileConfig = .defaultMedium,
                 high: MediaUploadProfileConfig = .defaultHigh,
-                audioSettingsVersion: Int = MediaUploadDebugSettings.currentAudioSettingsVersion) {
+                audioSettingsVersion: Int = 2) {
         self.videoEngineRaw = videoEngineRaw
         self.perFileMaxBytes = perFileMaxBytes
         self.packageMaxBytes = packageMaxBytes
@@ -563,17 +563,98 @@ import UniformTypeIdentifiers
         return guestimatedExportPresetMbps(profile.exportPreset)
     }
 
-    /// Writer size estimate matching encode: H.264 + profile AAC (when `hasAudio`), including bitrate floors.
+    /// Effective Writer AAC after `min(profile, source)` — shared by encode + chip/Send estimates.
+    public struct WriterAudioTarget: Equatable {
+        public let bitrateKbps: Int
+        public let channels: Int
+        /// Source track estimate in kbps when known; nil → used profile target as-is.
+        public let sourceBitrateKbps: Int?
+        public let cappedBySource: Bool
+
+        public var bitsPerSecond: Int {
+            MediaUploadProfileConfig.clampedAudioBitrateKbps(bitrateKbps) * 1000
+        }
+    }
+
+    /// Plausible AAC range for trusting `AVAssetTrack.estimatedDataRate` (bits/sec → kbps).
+    private static let sourceAudioBitrateMinKbps = 16
+    private static let sourceAudioBitrateMaxKbps = 320
+
+    /// Best-effort source audio kbps. `estimatedDataRate` is approximate (VBR / container); out-of-range → nil.
+    public static func sourceAudioBitrateKbps(track: AVAssetTrack) -> Int? {
+        let rate = track.estimatedDataRate
+        guard rate.isFinite, rate > 0 else { return nil }
+        let kbps = Int((rate / 1000.0).rounded())
+        guard kbps >= sourceAudioBitrateMinKbps, kbps <= sourceAudioBitrateMaxKbps else { return nil }
+        return kbps
+    }
+
+    public static func sourceAudioChannelCount(track: AVAssetTrack) -> Int? {
+        for format in track.formatDescriptions {
+            // formatDescriptions is [Any]; CF types need a forced cast (as? warns "always succeeds").
+            let desc = format as! CMFormatDescription
+            guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee else {
+                continue
+            }
+            let count = Int(asbd.mChannelsPerFrame)
+            if count >= 1 { return count >= 2 ? 2 : 1 }
+        }
+        return nil
+    }
+
+    /// Encode + estimate target: never spend more AAC bits (or channels) than the source already has.
+    public static func writerAudioTarget(profile: MediaUploadProfileConfig,
+                                         audioTrack: AVAssetTrack?) -> WriterAudioTarget {
+        let profileKbps = MediaUploadProfileConfig.clampedAudioBitrateKbps(profile.audioBitrateKbps)
+        let profileChannels = MediaUploadProfileConfig.clampedAudioChannels(profile.audioChannels)
+        guard let audioTrack else {
+            return WriterAudioTarget(bitrateKbps: profileKbps,
+                                     channels: profileChannels,
+                                     sourceBitrateKbps: nil,
+                                     cappedBySource: false)
+        }
+
+        let sourceKbps = sourceAudioBitrateKbps(track: audioTrack)
+        let sourceChannels = sourceAudioChannelCount(track: audioTrack)
+
+        let bitrateKbps: Int
+        let capped: Bool
+        if let sourceKbps {
+            bitrateKbps = min(profileKbps, sourceKbps)
+            capped = bitrateKbps < profileKbps
+        } else {
+            bitrateKbps = profileKbps
+            capped = false
+        }
+
+        let channels: Int
+        if let sourceChannels {
+            channels = min(profileChannels, sourceChannels)
+        } else {
+            channels = profileChannels
+        }
+
+        return WriterAudioTarget(bitrateKbps: bitrateKbps,
+                                 channels: channels,
+                                 sourceBitrateKbps: sourceKbps,
+                                 cappedBySource: capped)
+    }
+
+    /// Writer size estimate matching encode: H.264 + effective AAC (when `hasAudio`), including bitrate floors.
     public static func estimatedWriterVideoBytes(profile: MediaUploadProfileConfig,
                                                  durationSeconds: Double,
                                                  originalSize: Int64,
-                                                 hasAudio: Bool = true) -> Int64 {
+                                                 hasAudio: Bool = true,
+                                                 audioBitrateKbps: Int? = nil) -> Int64 {
         guard durationSeconds.isFinite, durationSeconds > 0 else {
             return originalSize > 0 ? originalSize : 12_288
         }
         let rateMbps = effectiveRateMbps(profile: profile, durationSeconds: durationSeconds)
         let totalBitsPerSecond = rateMbps * 1_000_000.0
-        let audioBitsPerSecond = hasAudio ? Double(profile.audioBitsPerSecond) : 0
+        let audioKbps = audioBitrateKbps ?? profile.audioBitrateKbps
+        let audioBitsPerSecond = hasAudio
+            ? Double(MediaUploadProfileConfig.clampedAudioBitrateKbps(audioKbps) * 1000)
+            : 0
         let videoBitsPerSecond = max(100_000.0, totalBitsPerSecond - audioBitsPerSecond)
         let muxBitsPerSecond = videoBitsPerSecond + audioBitsPerSecond
         let estimated = Int64(muxBitsPerSecond / 8.0 * durationSeconds)
@@ -605,16 +686,30 @@ import UniformTypeIdentifiers
     }
 
     /// URL-aware estimate: Apple ExportSession estimate when engine is presets.
-    public static func estimatedVideoBytes(at fileURL: URL, profile: MediaUploadProfileConfig, durationSeconds: Double, originalSize: Int64) -> Int64 {
+    /// Pass a preloaded `asset` when computing Low/Med/High for the same file to avoid reopening.
+    public static func estimatedVideoBytes(at fileURL: URL,
+                                           profile: MediaUploadProfileConfig,
+                                           durationSeconds: Double,
+                                           originalSize: Int64,
+                                           asset: AVAsset? = nil) -> Int64 {
         if !shared().usesAssetWriter,
            let apple = appleEstimatedExportBytes(at: fileURL, presetKey: profile.exportPreset) {
             return max(12_288, min(apple, originalSize > 0 ? originalSize : apple))
         }
-        let hasAudio = shared().usesAssetWriter ? assetHasAudioTrack(at: fileURL) : true
+        if shared().usesAssetWriter {
+            let resolved = asset ?? AVURLAsset(url: fileURL)
+            let audioTrack = resolved.tracks(withMediaType: .audio).first
+            let audio = writerAudioTarget(profile: profile, audioTrack: audioTrack)
+            return estimatedWriterVideoBytes(profile: profile,
+                                             durationSeconds: durationSeconds,
+                                             originalSize: originalSize,
+                                             hasAudio: audioTrack != nil,
+                                             audioBitrateKbps: audio.bitrateKbps)
+        }
         return estimatedVideoBytes(profile: profile,
                                    durationSeconds: durationSeconds,
                                    originalSize: originalSize,
-                                   hasAudio: hasAudio)
+                                   hasAudio: true)
     }
 
     /// Cheap ExportSession-preset guestimate (no AVAsset). Used when Settings = Presets.
@@ -679,13 +774,25 @@ import UniformTypeIdentifiers
         // Same rule as Manual chips: compress when estimated output is ≥10% smaller (bytes).
         let willShrink: Bool
         if usesWriter {
-            let hasAudio = !asset.tracks(withMediaType: .audio).isEmpty
+            let audioTrack = asset.tracks(withMediaType: .audio).first
+            let audio = writerAudioTarget(profile: profile, audioTrack: audioTrack)
             let expectedBytes = estimatedWriterVideoBytes(profile: profile,
                                                           durationSeconds: duration,
                                                           originalSize: original,
-                                                          hasAudio: hasAudio)
+                                                          hasAudio: audioTrack != nil,
+                                                          audioBitrateKbps: audio.bitrateKbps)
             willShrink = expectedBytes < thresholdBytes
             let targetMbps = targetVideoMbps(profile: profile, durationSeconds: duration)
+            let audioLabel: String
+            if audioTrack == nil {
+                audioLabel = "none"
+            } else if let sourceKbps = audio.sourceBitrateKbps {
+                audioLabel = audio.cappedBySource
+                    ? String(format: "%dk/%dch(min src=%dk)", audio.bitrateKbps, audio.channels, sourceKbps)
+                    : String(format: "%dk/%dch(src=%dk)", audio.bitrateKbps, audio.channels, sourceKbps)
+            } else {
+                audioLabel = String(format: "%dk/%dch(src=unknown)", audio.bitrateKbps, audio.channels)
+            }
             NCLog.log(String(format:
                 "MediaUploadHeuristic video %@ level=%ld engine=writer duration=%.2fs original=%lld (%.2f MB) sourceTotal=%.3fMbps target=%.3fMbps expected=%lld (%.2f MB) threshold=%lld audio=%@ → %@",
                 fileURL.lastPathComponent,
@@ -698,7 +805,7 @@ import UniformTypeIdentifiers
                 expectedBytes,
                 Double(expectedBytes) / 1_048_576.0,
                 thresholdBytes,
-                hasAudio ? "yes" : "none",
+                audioLabel,
                 willShrink ? "compress" : "skip"))
         } else if !forceExportSession,
                   let appleBytes = appleEstimatedExportBytes(at: fileURL, presetKey: profile.exportPreset) {

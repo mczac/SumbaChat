@@ -176,13 +176,25 @@ enum MediaUploadVideoWriter {
             return
         }
 
-        let sourceHasAudio = !asset.tracks(withMediaType: .audio).isEmpty
+        let audioTrack = asset.tracks(withMediaType: .audio).first
+        let audioTarget = MediaUploadDebugSettings.writerAudioTarget(profile: profile, audioTrack: audioTrack)
+        let sourceHasAudio = audioTrack != nil
         let rateMbps = MediaUploadDebugSettings.effectiveRateMbps(profile: profile, durationSeconds: durationSeconds)
         let totalBitsPerSecond = rateMbps * 1_000_000.0
-        // Reserve profile AAC only when the source has audio (matches chip/Send size estimate).
-        let audioBitsPerSecond = sourceHasAudio ? Double(profile.audioBitsPerSecond) : 0
+        // Reserve effective AAC (min profile/source) when the source has audio — matches chip/Send estimate.
+        let audioBitsPerSecond = sourceHasAudio ? Double(audioTarget.bitsPerSecond) : 0
         let videoBitsPerSecond = max(100_000, Int(totalBitsPerSecond - audioBitsPerSecond))
         let fps = max(1, Int(profile.videoFPS.rounded()))
+        let aacLabel: String
+        if !sourceHasAudio {
+            aacLabel = "none"
+        } else if let sourceKbps = audioTarget.sourceBitrateKbps {
+            aacLabel = audioTarget.cappedBySource
+                ? String(format: "%dk/%dch(min src=%dk)", audioTarget.bitrateKbps, audioTarget.channels, sourceKbps)
+                : String(format: "%dk/%dch", audioTarget.bitrateKbps, audioTarget.channels)
+        } else {
+            aacLabel = String(format: "%dk/%dch", audioTarget.bitrateKbps, audioTarget.channels)
+        }
         MediaUploadTrace.logSync(String(format:
             "WRITER start %@ duration=%.1fs out=%dx%d edge=%d rate=%.2fMbps videoBitrate=%d aac=%@ fps=%d avail=%.0fMB",
             sourceURL.lastPathComponent,
@@ -191,9 +203,7 @@ enum MediaUploadVideoWriter {
             profile.videoMaxEdge,
             rateMbps,
             videoBitsPerSecond,
-            sourceHasAudio
-                ? String(format: "%dk/%dch", profile.audioBitrateKbps, profile.audioChannels)
-                : "none",
+            aacLabel,
             fps,
             MediaUploadMemoryGateObjC.availableMegabytes()))
 
@@ -239,19 +249,20 @@ enum MediaUploadVideoWriter {
             }
             writer.add(videoWriterInput)
 
-            // Audio — Linear PCM → AAC at the profile bitrate so the size budget is honest.
+            // Audio — Linear PCM → AAC at min(profile, source) so we never inflate bitrate/channels.
             var audioReaderOutput: AVAssetReaderTrackOutput?
             var audioWriterInput: AVAssetWriterInput?
-            if let audioTrack = asset.tracks(withMediaType: .audio).first {
+            if let audioTrack {
                 if let wired = Self.wireAudio(track: audioTrack,
                                               reader: reader,
                                               writer: writer,
-                                              profile: profile) {
+                                              audioTarget: audioTarget) {
                     audioReaderOutput = wired.readerOutput
                     audioWriterInput = wired.writerInput
-                    MediaUploadTrace.logSync(String(format: "WRITER audio path=aac kbps=%d ch=%d %@",
-                                                    profile.audioBitrateKbps,
-                                                    profile.audioChannels,
+                    MediaUploadTrace.logSync(String(format: "WRITER audio path=aac kbps=%d ch=%d%@ %@",
+                                                    audioTarget.bitrateKbps,
+                                                    audioTarget.channels,
+                                                    audioTarget.cappedBySource ? " capped" : "",
                                                     sourceURL.lastPathComponent))
                 } else {
                     // Fail the Writer encode so ExportSession can take over — never upload mute.
@@ -411,7 +422,7 @@ enum MediaUploadVideoWriter {
                                 MediaUploadTrace.mb(sourceSize), srcMbps,
                                 MediaUploadTrace.mb(compressedSize), outMbps,
                                 width, height, videoBitsPerSecond,
-                                profile.audioBitrateKbps,
+                                audioTarget.bitrateKbps,
                                 sourceHasAudio ? "yes" : "none"))
                             completion(true)
                         }
@@ -430,13 +441,13 @@ enum MediaUploadVideoWriter {
         let writerInput: AVAssetWriterInput
     }
 
-    /// Decode source audio to Linear PCM and re-encode AAC at the profile bitrate / channels.
+    /// Decode source audio to Linear PCM and re-encode AAC at the effective (min) bitrate / channels.
     private static func wireAudio(track audioTrack: AVAssetTrack,
                                   reader: AVAssetReader,
                                   writer: AVAssetWriter,
-                                  profile: MediaUploadProfileConfig) -> WiredAudio? {
-        let channels = MediaUploadProfileConfig.clampedAudioChannels(profile.audioChannels)
-        let bitrate = MediaUploadProfileConfig.clampedAudioBitrateKbps(profile.audioBitrateKbps) * 1000
+                                  audioTarget: MediaUploadDebugSettings.WriterAudioTarget) -> WiredAudio? {
+        let channels = MediaUploadProfileConfig.clampedAudioChannels(audioTarget.channels)
+        let bitrate = MediaUploadProfileConfig.clampedAudioBitrateKbps(audioTarget.bitrateKbps) * 1000
 
         var channelLayout = AudioChannelLayout()
         channelLayout.mChannelLayoutTag = channels > 1

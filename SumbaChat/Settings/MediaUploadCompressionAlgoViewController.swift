@@ -73,9 +73,10 @@ final class MediaUploadCompressionAlgoViewController: UIViewController {
 
     // 1) Bitrate — AVAssetWriter [default]
     //    target TOTAL Mbps (video+audio when source has audio)
-    //    video ≈ rate×1e6 − profile AAC (0 if silent); AAC = PCM→AAC @ profile kbps/ch / 44.1 kHz
+    //    video ≈ rate×1e6 − effective AAC (0 if silent)
+    //    AAC = PCM→AAC @ min(profile, source) kbps/ch / 44.1 kHz (source from estimatedDataRate when plausible)
     //    scales to videoMaxEdge (+ batch edgeCap); uses videoFPS
-    //    chip + Send shrink gate: expectedBytes < original×0.9 (same byte formula)
+    //    chip + Send shrink gate: expectedBytes < original×0.9 (same byte formula; estimate uses min too)
     //    estimate ≈ (videoBits + audioBits)×duration/8 including floors; Writer fail → ExportSession once
 
     // 2) Presets — AVAssetExportSession

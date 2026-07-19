@@ -210,7 +210,8 @@ class RoomsTableViewController: UITableViewController, CCCertificateDelegate, UI
     }
 
     private func setNavigationLogoButton() {
-        let titleView = RoomsNavigationLogoTitleView(side: 30, logoInset: 6)
+        // Logo was 18pt in a 30pt circle (inset 6); +50% → 27pt, inset 1.5 — still inside the badge.
+        let titleView = RoomsNavigationLogoTitleView(side: 30, logoInset: 1.5)
         titleView.isAccessibilityElement = true
         titleView.accessibilityLabel = talkAppName
         self.navigationItem.titleView = titleView

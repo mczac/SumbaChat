@@ -832,6 +832,13 @@ import UniformTypeIdentifiers
         public var high: Int64
     }
 
+    /// Chip bag: label totals + enablement (any item that shrinks ≥10% enables that level).
+    public struct BagCompressionEstimates {
+        public var totals: LevelEstimates
+        public var enabled: Set<MediaUploadCompressionLevel>
+        public var perItem: [LevelEstimates]
+    }
+
     /// Share Extension–safe chip labels.
     public static func cheapEstimatedByteCounts(at fileURL: URL, treatAsImage: Bool? = nil) -> LevelEstimates {
         let extensionName = fileURL.pathExtension.lowercased()
@@ -855,7 +862,9 @@ import UniformTypeIdentifiers
         }
 
         if isVideo(fileExtension: extensionName) {
-            let duration = videoDurationSeconds(at: fileURL)
+            // One AVAsset for duration + Low/Med/High Writer audio targets.
+            let asset = AVURLAsset(url: fileURL)
+            let duration = videoDurationSeconds(from: asset)
             let lowP = debug.low
             let medP = debug.medium
             let highP = debug.high
@@ -863,9 +872,21 @@ import UniformTypeIdentifiers
             let medium: Int64
             let high: Int64
             if let duration, duration > 0 {
-                low = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL, profile: lowP, durationSeconds: duration, originalSize: originalSize)
-                medium = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL, profile: medP, durationSeconds: duration, originalSize: originalSize)
-                high = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL, profile: highP, durationSeconds: duration, originalSize: originalSize)
+                low = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL,
+                                                                   profile: lowP,
+                                                                   durationSeconds: duration,
+                                                                   originalSize: originalSize,
+                                                                   asset: asset)
+                medium = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL,
+                                                                      profile: medP,
+                                                                      durationSeconds: duration,
+                                                                      originalSize: originalSize,
+                                                                      asset: asset)
+                high = MediaUploadDebugSettings.estimatedVideoBytes(at: fileURL,
+                                                                    profile: highP,
+                                                                    durationSeconds: duration,
+                                                                    originalSize: originalSize,
+                                                                    asset: asset)
             } else {
                 low = heuristicCompressedByteCount(originalSize: originalSize, level: .low)
                 medium = heuristicCompressedByteCount(originalSize: originalSize, level: .medium)
@@ -881,10 +902,19 @@ import UniformTypeIdentifiers
     }
 
     public static func cheapEstimatedByteCounts(forFileURLs fileURLs: [URL]) -> LevelEstimates {
+        bagCompressionEstimates(forFileURLs: fileURLs).totals
+    }
+
+    /// One pass: chip label totals + any-item enablement + per-item estimates for logging.
+    public static func bagCompressionEstimates(forFileURLs fileURLs: [URL]) -> BagCompressionEstimates {
         var none: Int64 = 0
         var low: Int64 = 0
         var medium: Int64 = 0
         var high: Int64 = 0
+        var anyLow = false
+        var anyMedium = false
+        var anyHigh = false
+        var perItem: [LevelEstimates] = []
         // Sum raw estimates only — do not re-run MediaUploadHeuristic shrink checks here
         // (that was logging ~6 lines per level when chips also called compressionLevelLikelyUseful).
         let usesWriter = MediaUploadDebugSettings.shared().usesAssetWriter
@@ -918,21 +948,52 @@ import UniformTypeIdentifiers
                 counts.high = max(12_288, min(exportHigh, counts.medium))
             }
 
+            perItem.append(counts)
+
             // Chip totals: use compress estimate only when it is ≥10% smaller; else original.
+            // Enable level if **any** item would shrink (Send still keeps original for non-winners).
             let threshold = Int64(Double(counts.none) * shrinkThreshold)
-            let itemLow = counts.low < threshold ? counts.low : counts.none
-            let itemMedium = counts.medium < threshold ? counts.medium : counts.none
-            let itemHigh = counts.high < threshold ? counts.high : counts.none
+            let itemLow: Int64
+            if counts.low < threshold {
+                anyLow = true
+                itemLow = counts.low
+            } else {
+                itemLow = counts.none
+            }
+            let itemMedium: Int64
+            if counts.medium < threshold {
+                anyMedium = true
+                itemMedium = counts.medium
+            } else {
+                itemMedium = counts.none
+            }
+            let itemHigh: Int64
+            if counts.high < threshold {
+                anyHigh = true
+                itemHigh = counts.high
+            } else {
+                itemHigh = counts.none
+            }
 
             none += counts.none
             low += min(itemLow, counts.none)
             medium += min(itemMedium, min(itemLow, counts.none))
             high += min(itemHigh, min(itemMedium, min(itemLow, counts.none)))
         }
-        return LevelEstimates(none: none, low: low, medium: medium, high: high)
+
+        var enabled: Set<MediaUploadCompressionLevel> = [.none]
+        if anyLow { enabled.insert(.low) }
+        if anyMedium { enabled.insert(.medium) }
+        if anyHigh { enabled.insert(.high) }
+
+        return BagCompressionEstimates(
+            totals: LevelEstimates(none: none, low: low, medium: medium, high: high),
+            enabled: enabled,
+            perItem: perItem
+        )
     }
 
-    /// Chip enablement from already-computed totals — no extra heuristic AVAsset passes.
+    /// Bag-total enablement (legacy). Prefer `bagCompressionEstimates` any-item enablement for chips.
     public static func compressionLevelsUsefulFromEstimates(_ totals: LevelEstimates) -> Set<MediaUploadCompressionLevel> {
         var enabled: Set<MediaUploadCompressionLevel> = [.none]
         let threshold = Int64(Double(totals.none) * 0.90)
@@ -1011,7 +1072,10 @@ import UniformTypeIdentifiers
     }
 
     private static func videoDurationSeconds(at fileURL: URL) -> Double? {
-        let asset = AVURLAsset(url: fileURL)
+        videoDurationSeconds(from: AVURLAsset(url: fileURL))
+    }
+
+    private static func videoDurationSeconds(from asset: AVAsset) -> Double? {
         if asset.statusOfValue(forKey: "duration", error: nil) != .loaded {
             let group = DispatchGroup()
             group.enter()

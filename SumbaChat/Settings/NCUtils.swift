@@ -232,6 +232,57 @@ import AVFoundation
         return dateFormatter.string(from: date)
     }
 
+    /// Sticky section title for a file’s modification day (Today / Yesterday / weekday / date).
+    public static func fileListDaySectionTitle(from date: Date) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+
+        if calendar.isDateInToday(date) {
+            return NSLocalizedString("Today", comment: "File list day section header")
+        } else if calendar.isDateInYesterday(date) {
+            return NSLocalizedString("Yesterday", comment: "")
+        } else if isDateWithinLastDays(date: date, days: 6) {
+            let weekdayFormatter = DateFormatter()
+            weekdayFormatter.setLocalizedDateFormatFromTemplate("EEEE")
+            return weekdayFormatter.string(from: date)
+        } else if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            let monthDayFormatter = DateFormatter()
+            monthDayFormatter.setLocalizedDateFormatFromTemplate("MMMd")
+            return monthDayFormatter.string(from: date)
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.setLocalizedDateFormatFromTemplate("yyyyMMMd")
+            return dateFormatter.string(from: date)
+        }
+    }
+
+    /// Middle-truncate a file name for alerts (keeps the extension when present).
+    public static func middleTruncatedFileName(_ fileName: String, maxLength: Int = 40) -> String {
+        guard maxLength > 3, fileName.count > maxLength else { return fileName }
+
+        let ellipsis = "…"
+        let nsName = fileName as NSString
+        let ext = nsName.pathExtension
+        let base = ext.isEmpty ? fileName : nsName.deletingPathExtension
+        let suffix = ext.isEmpty ? "" : ".\(ext)"
+
+        let budget = maxLength - ellipsis.count - suffix.count
+        guard budget > 2 else {
+            let keep = maxLength - ellipsis.count
+            let headLen = (keep + 1) / 2
+            let tailLen = keep / 2
+            return String(fileName.prefix(headLen)) + ellipsis + String(fileName.suffix(tailLen))
+        }
+
+        if base.count <= budget {
+            return fileName
+        }
+
+        let headLen = (budget + 1) / 2
+        let tailLen = budget / 2
+        return String(base.prefix(headLen)) + ellipsis + String(base.suffix(tailLen)) + suffix
+    }
+
     /// Compact file size for list subtitles (e.g. "4.1 MB").
     public static func readableFileSize(_ byteCount: Int64) -> String {
         guard byteCount > 0 else { return "" }

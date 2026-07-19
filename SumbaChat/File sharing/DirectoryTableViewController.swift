@@ -8,7 +8,8 @@ import NextcloudKit
 
 class DirectoryTableViewController: UITableViewController, UISearchResultsUpdating {
 
-    private enum FileTypeFilter: Int {
+    /// Shared when pushing into subfolders so the type filter stays applied.
+    enum FileTypeFilter: Int {
         case all
         case video
         case audio
@@ -41,6 +42,11 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
         }
     }
 
+    private struct FileListSection {
+        let title: String?
+        let items: [NKFile]
+    }
+
     private let path: String
     private let token: String
     private let threadId: Int
@@ -48,8 +54,8 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
     private var userHomePath = ""
     /// Full folder listing from the server (unfiltered).
     private var allItemsInDirectory: [NKFile] = []
-    /// Sorted + type/name-filtered rows shown in the table.
-    private var itemsInDirectory: [NKFile] = []
+    /// Sorted + filtered sections shown in the table.
+    private var sections: [FileListSection] = []
     private var fileTypeFilter: FileTypeFilter
     private var nameSearchText: String = ""
     private var sortingButton: UIBarButtonItem?
@@ -113,27 +119,58 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
     }
 
     @objc private func shareButtonPressed() {
-        showConfirmationDialogForSharingItem(withPath: path, andName: (path as NSString).lastPathComponent)
+        showConfirmationDialogForSharingItem(withPath: path,
+                                             andName: (path as NSString).lastPathComponent,
+                                             isDirectory: true)
     }
 
     private func addMenuToSortingButton() {
-        let preferredSorting = NCSettingsController.sharedInstance().getPreferredFileSorting()
+        let settings = NCSettingsController.sharedInstance()
+        let preferredSorting = settings.getPreferredFileSorting()
+        let ascending = settings.isPreferredFileSortingAscending()
 
-        let alphabeticalAction = UIAction(title: NSLocalizedString("Alphabetical order", comment: ""), image: UIImage(systemName: "character.square")) { [weak self] _ in
-            NCSettingsController.sharedInstance().setPreferredFileSorting(.alphabeticalSorting)
+        let nameAscending = UIAction(
+            title: NSLocalizedString("Name A–Z", comment: "File browser sort: name ascending"),
+            image: UIImage(systemName: "character.square")
+        ) { [weak self] _ in
+            settings.setPreferredFileSorting(.alphabeticalSorting)
+            settings.setPreferredFileSortingAscending(true)
             self?.applyFilterAndSort()
         }
 
-        alphabeticalAction.state = preferredSorting == .alphabeticalSorting ? .on : .off
-
-        let modificationDateAction = UIAction(title: NSLocalizedString("Modification date", comment: ""), image: UIImage(systemName: "clock")) { [weak self] _ in
-            NCSettingsController.sharedInstance().setPreferredFileSorting(.modificationDateSorting)
+        let nameDescending = UIAction(
+            title: NSLocalizedString("Name Z–A", comment: "File browser sort: name descending"),
+            image: UIImage(systemName: "character.square")
+        ) { [weak self] _ in
+            settings.setPreferredFileSorting(.alphabeticalSorting)
+            settings.setPreferredFileSortingAscending(false)
             self?.applyFilterAndSort()
         }
 
-        modificationDateAction.state = preferredSorting == .modificationDateSorting ? .on : .off
+        let dateNewest = UIAction(
+            title: NSLocalizedString("Date (newest first)", comment: "File browser sort: date descending"),
+            image: UIImage(systemName: "clock")
+        ) { [weak self] _ in
+            settings.setPreferredFileSorting(.modificationDateSorting)
+            settings.setPreferredFileSortingAscending(false)
+            self?.applyFilterAndSort()
+        }
 
-        sortingButton?.menu = UIMenu(children: [alphabeticalAction, modificationDateAction])
+        let dateOldest = UIAction(
+            title: NSLocalizedString("Date (oldest first)", comment: "File browser sort: date ascending"),
+            image: UIImage(systemName: "clock")
+        ) { [weak self] _ in
+            settings.setPreferredFileSorting(.modificationDateSorting)
+            settings.setPreferredFileSortingAscending(true)
+            self?.applyFilterAndSort()
+        }
+
+        nameAscending.state = (preferredSorting == .alphabeticalSorting && ascending) ? .on : .off
+        nameDescending.state = (preferredSorting == .alphabeticalSorting && !ascending) ? .on : .off
+        dateNewest.state = (preferredSorting == .modificationDateSorting && !ascending) ? .on : .off
+        dateOldest.state = (preferredSorting == .modificationDateSorting && ascending) ? .on : .off
+
+        sortingButton?.menu = UIMenu(children: [nameAscending, nameDescending, dateNewest, dateOldest])
     }
 
     private func addMenuToFilterButton() {
@@ -196,6 +233,7 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
 
     private func applyFilterAndSort() {
         let query = nameSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hideFoldersForTypeFilter = fileTypeFilter != .all
 
         var filtered = allItemsInDirectory.filter { item in
             if !query.isEmpty,
@@ -203,8 +241,11 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
                 return false
             }
 
-            // Folders stay visible for navigation (unless excluded by name search above).
+            // Type filters hide folders (attachment pick). Name search keeps matching folders for navigation.
             if item.directory {
+                if hideFoldersForTypeFilter {
+                    return !query.isEmpty
+                }
                 return true
             }
 
@@ -220,21 +261,77 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
             }
         }
 
-        if NCSettingsController.sharedInstance().getPreferredFileSorting() == .alphabeticalSorting {
-            filtered.sort { $0.fileName.localizedCaseInsensitiveCompare($1.fileName) == .orderedAscending }
+        let settings = NCSettingsController.sharedInstance()
+        let sortByName = settings.getPreferredFileSorting() == .alphabeticalSorting
+        let ascending = settings.isPreferredFileSortingAscending()
+
+        if sortByName {
+            filtered.sort { lhs, rhs in
+                let result = lhs.fileName.localizedCaseInsensitiveCompare(rhs.fileName)
+                return ascending ? (result == .orderedAscending) : (result == .orderedDescending)
+            }
+            sections = filtered.isEmpty ? [] : [FileListSection(title: nil, items: filtered)]
         } else {
-            filtered.sort { ($0.date as Date) > ($1.date as Date) }
+            filtered.sort { lhs, rhs in
+                let lhsDate = lhs.date as Date
+                let rhsDate = rhs.date as Date
+                if lhsDate == rhsDate {
+                    let result = lhs.fileName.localizedCaseInsensitiveCompare(rhs.fileName)
+                    return result == .orderedAscending
+                }
+                return ascending ? (lhsDate < rhsDate) : (lhsDate > rhsDate)
+            }
+            sections = Self.daySections(from: filtered)
         }
 
-        itemsInDirectory = filtered
         addMenuToSortingButton()
         addMenuToFilterButton()
         updatePlaceholderVisibility()
         tableView.reloadData()
     }
 
+    /// Group already-sorted items into calendar-day sections (sticky via UITableView headers).
+    private static func daySections(from items: [NKFile]) -> [FileListSection] {
+        guard !items.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        var result: [FileListSection] = []
+        var currentDay: Date?
+        var currentItems: [NKFile] = []
+
+        for item in items {
+            let day = calendar.startOfDay(for: item.date as Date)
+            if currentDay == nil {
+                currentDay = day
+            }
+            if day != currentDay {
+                if let currentDay, !currentItems.isEmpty {
+                    result.append(FileListSection(title: NCUtils.fileListDaySectionTitle(from: currentDay), items: currentItems))
+                }
+                currentDay = day
+                currentItems = [item]
+            } else {
+                currentItems.append(item)
+            }
+        }
+
+        if let currentDay, !currentItems.isEmpty {
+            result.append(FileListSection(title: NCUtils.fileListDaySectionTitle(from: currentDay), items: currentItems))
+        }
+
+        return result
+    }
+
+    private func item(at indexPath: IndexPath) -> NKFile? {
+        guard sections.indices.contains(indexPath.section),
+              sections[indexPath.section].items.indices.contains(indexPath.row) else {
+            return nil
+        }
+        return sections[indexPath.section].items[indexPath.row]
+    }
+
     private func updatePlaceholderVisibility() {
-        let hasRows = !itemsInDirectory.isEmpty
+        let hasRows = sections.contains { !$0.items.isEmpty }
         directoryBackgroundView.placeholderView.isHidden = hasRows
         let hasNameQuery = !nameSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if fileTypeFilter == .all && !hasNameQuery {
@@ -338,10 +435,15 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
         self.tableView.isUserInteractionEnabled = true
     }
 
-    private func showConfirmationDialogForSharingItem(withPath path: String, andName name: String) {
-        let confirmDialog = UIAlertController(title: name,
-                                              message: String(format: NSLocalizedString("Do you want to share '%@' in the conversation?", comment: ""), name),
-                                              preferredStyle: .alert)
+    private func showConfirmationDialogForSharingItem(withPath path: String, andName name: String, isDirectory: Bool) {
+        let title = isDirectory
+            ? NSLocalizedString("Share Folder", comment: "Confirm sharing a folder into the conversation")
+            : NSLocalizedString("Share File", comment: "Confirm sharing a file into the conversation")
+        let message = String(
+            format: NSLocalizedString("Do you want to share '%@' in the conversation?", comment: ""),
+            NCUtils.middleTruncatedFileName(name)
+        )
+        let confirmDialog = UIAlertController(title: title, message: message, preferredStyle: .alert)
         confirmDialog.addAction(UIAlertAction(title: NSLocalizedString("Share", comment: ""), style: .default) { [weak self] _ in
             self?.shareFile(withPath: path)
         })
@@ -360,11 +462,17 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
     // MARK: - Table view data source
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        return 1
+        return sections.count
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return itemsInDirectory.count
+        guard sections.indices.contains(section) else { return 0 }
+        return sections[section].items.count
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard sections.indices.contains(section) else { return nil }
+        return sections[section].title
     }
 
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
@@ -372,9 +480,12 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let item = itemsInDirectory[indexPath.row]
         let cell = tableView.dequeueReusableCell(withIdentifier: DirectoryTableViewCell.identifier) as? DirectoryTableViewCell ??
                    DirectoryTableViewCell(style: .default, reuseIdentifier: DirectoryTableViewCell.identifier)
+
+        guard let item = item(at: indexPath) else {
+            return cell
+        }
 
         // Name (middle-truncated in the cell) + size · relative date
         cell.fileNameLabel.text = item.fileName
@@ -400,7 +511,11 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let item = itemsInDirectory[indexPath.row]
+        guard let item = item(at: indexPath) else {
+            tableView.deselectRow(at: indexPath, animated: true)
+            return
+        }
+
         let selectedItemPath = "\(path)/\(item.fileName)"
 
         if item.directory {
@@ -410,7 +525,7 @@ class DirectoryTableViewController: UITableViewController, UISearchResultsUpdati
                                                            fileTypeFilter: fileTypeFilter)
             self.navigationController?.pushViewController(directoryVC, animated: true)
         } else {
-            showConfirmationDialogForSharingItem(withPath: selectedItemPath, andName: item.fileName)
+            showConfirmationDialogForSharingItem(withPath: selectedItemPath, andName: item.fileName, isDirectory: false)
         }
 
         tableView.deselectRow(at: indexPath, animated: true)
