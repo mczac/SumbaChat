@@ -6,7 +6,7 @@
 import Foundation
 
 enum SumbaDeleteAccountResult {
-    /// Server accepted account retire / delete.
+    /// Server accepted account retire (`202 Accepted`).
     /// - Parameters:
     ///   - anonymizedDisplayName: Final label from server, e.g. `Former Team Member (1721491200)`.
     ///   - alreadyRetired: Idempotent re-call; account was already retired.
@@ -21,20 +21,16 @@ enum SumbaDeletePasswordVerifyResult {
     case failed(message: String)
 }
 
-/// Account deletion / retire.
+/// Account retire via Talk Upload Policy (requires `sumbachat-client.accountRetire.enabled`).
 ///
-/// Prefer Talk Upload Policy retire when
-/// `spreed.config.sumbachat-client.accountRetire.enabled == true`:
-///   `DELETE /ocs/v2.php/apps/talk_upload_policy/api/v1/account`
-/// else legacy Drop Account:
-///   `DELETE /ocs/v2.php/apps/drop_account/api/v1/account`
+/// `DELETE /ocs/v2.php/apps/talk_upload_policy/api/v1/account`
 ///
-/// Retire requires Basic auth with the real account password
-/// (`PasswordConfirmationRequired(strict: true)`).
+/// Headers: `OCS-APIRequest`, `Accept: application/json`, `Authorization: Basic` (username:password).
+/// Success: `202 Accepted` with `anonymizedDisplayName`, `retiredAt`, `alreadyRetired`.
+/// The server invalidates the session — the client clears local credentials after success.
 enum SumbaDeleteAccountService {
 
     private static let retireAPIPath = "/ocs/v2.php/apps/talk_upload_policy/api/v1/account"
-    private static let dropAccountAPIPath = "/ocs/v2.php/apps/drop_account/api/v1/account"
 
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -98,38 +94,32 @@ enum SumbaDeleteAccountService {
         completion: @escaping (SumbaDeleteAccountResult) -> Void
     ) {
         let accountId = account.accountId
-        let preferRetire = SumbaChatClientConfig.accountRetireSupported
-        let path = preferRetire ? retireAPIPath : dropAccountAPIPath
-        let apiLabel = preferRetire ? "talk_upload_policy/account" : "drop_account"
 
-        if preferRetire {
-            NCLog.log("Delete account: calling \(apiLabel) for \(accountId)")
-        } else {
-            NCLog.log("Delete account: WARNING — \(apiLabel) fallback (accountRetire.enabled != true) for \(accountId)")
+        guard SumbaChatClientConfig.accountRetireSupported else {
+            NCLog.log("Delete account: blocked — accountRetire.enabled != true for \(accountId)")
+            DispatchQueue.main.async {
+                completion(.failed(message: NSLocalizedString(
+                    "Account deletion is not available on this server.",
+                    comment: "Delete account when talk_upload_policy retire is disabled"
+                )))
+            }
+            return
         }
 
-        performDelete(
-            account: account,
-            password: password,
-            path: path,
-            apiLabel: apiLabel,
-            allowDropAccountFallback: preferRetire,
-            completion: completion
-        )
+        NCLog.log("Delete account: calling talk_upload_policy/account for \(accountId)")
+
+        performRetire(account: account, password: password, completion: completion)
     }
 
-    private static func performDelete(
+    private static func performRetire(
         account: TalkAccount,
         password: String,
-        path: String,
-        apiLabel: String,
-        allowDropAccountFallback: Bool,
         completion: @escaping (SumbaDeleteAccountResult) -> Void
     ) {
         let accountId = account.accountId
         let base = account.server.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: "\(base)\(path)") else {
-            NCLog.log("Delete account: \(apiLabel) URL invalid for \(accountId)")
+        guard let url = URL(string: "\(base)\(retireAPIPath)") else {
+            NCLog.log("Delete account: retire URL invalid for \(accountId)")
             DispatchQueue.main.async {
                 completion(.failed(message: NSLocalizedString("Invalid server URL.", comment: "")))
             }
@@ -143,7 +133,7 @@ enum SumbaDeleteAccountService {
         session.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 if let error {
-                    NCLog.log("Delete account: \(apiLabel) network error for \(accountId) — \(error.localizedDescription)")
+                    NCLog.log("Delete account: retire network error for \(accountId) — \(error.localizedDescription)")
                     completion(.failed(message: error.localizedDescription))
                     return
                 }
@@ -154,37 +144,34 @@ enum SumbaDeleteAccountService {
 
                 switch code {
                 case 200, 201, 202:
-                    NCLog.log("Delete account: \(apiLabel) succeeded for \(accountId) (HTTP \(code)) alreadyRetired=\(payload.alreadyRetired) name=\(payload.anonymizedDisplayName ?? "nil")")
+                    NCLog.log("Delete account: retire succeeded for \(accountId) (HTTP \(code)) alreadyRetired=\(payload.alreadyRetired) name=\(payload.anonymizedDisplayName ?? "nil")")
                     completion(.deleted(
                         anonymizedDisplayName: payload.anonymizedDisplayName,
                         alreadyRetired: payload.alreadyRetired
                     ))
-                case 429:
-                    NCLog.log("Delete account: \(apiLabel) rate-limited for \(accountId) (HTTP 429)")
-                    completion(.failed(message: SumbaServerConfiguration.tooManyAttemptsMessage))
-                case 401, 403:
-                    NCLog.log("Delete account: \(apiLabel) auth/forbidden for \(accountId) (HTTP \(code))")
-                    completion(.failed(message: message ?? NSLocalizedString("Incorrect password or deletion not allowed.", comment: "")))
+                case 401:
+                    NCLog.log("Delete account: retire not logged in for \(accountId) (HTTP 401)")
+                    completion(.failed(message: message ?? NSLocalizedString(
+                        "You are not logged in. Sign in again and retry.",
+                        comment: "Delete account retire HTTP 401"
+                    )))
+                case 403:
+                    NCLog.log("Delete account: retire forbidden for \(accountId) (HTTP 403)")
+                    completion(.failed(message: message ?? NSLocalizedString(
+                        "Account deletion is not allowed (for example, retire is disabled or you are the sole administrator).",
+                        comment: "Delete account retire HTTP 403"
+                    )))
                 case 404:
-                    NCLog.log("Delete account: \(apiLabel) missing for \(accountId) (HTTP 404)")
-                    if allowDropAccountFallback {
-                        NCLog.log("Delete account: WARNING — retire 404, falling back to drop_account for \(accountId)")
-                        performDelete(
-                            account: account,
-                            password: password,
-                            path: dropAccountAPIPath,
-                            apiLabel: "drop_account",
-                            allowDropAccountFallback: false,
-                            completion: completion
-                        )
-                    } else {
-                        completion(.failed(message: NSLocalizedString(
-                            "Account deletion is not available on this server.",
-                            comment: "Delete / retire endpoint missing"
-                        )))
-                    }
+                    NCLog.log("Delete account: retire user not found for \(accountId) (HTTP 404)")
+                    completion(.failed(message: message ?? NSLocalizedString(
+                        "Account not found.",
+                        comment: "Delete account retire HTTP 404"
+                    )))
+                case 429:
+                    NCLog.log("Delete account: retire rate-limited for \(accountId) (HTTP 429)")
+                    completion(.failed(message: SumbaServerConfiguration.tooManyAttemptsMessage))
                 default:
-                    NCLog.log("Delete account: \(apiLabel) failed for \(accountId) (HTTP \(code))")
+                    NCLog.log("Delete account: retire failed for \(accountId) (HTTP \(code))")
                     completion(.failed(message: message ?? String(
                         format: NSLocalizedString("Couldn’t delete account (error %d).", comment: ""),
                         code

@@ -71,6 +71,23 @@ import UIKit
         return button
     }()
 
+    private lazy var privacyPolicyButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = SumbaDeleteAccountCopy.privacyPolicyActionTitle
+        configuration.baseForegroundColor = .link
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .preferredFont(forTextStyle: .footnote)
+            attributes.underlineStyle = .single
+            return attributes
+        }
+        let button = UIButton(configuration: configuration)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(privacyPolicyTapped), for: .touchUpInside)
+        return button
+    }()
+
     private lazy var countdownRing: SumbaCountdownRingView = {
         let ring = SumbaCountdownRingView()
         ring.translatesAutoresizingMaskIntoConstraints = false
@@ -95,6 +112,7 @@ import UIKit
         view.addSubview(shredderView)
         view.addSubview(titleLabel)
         view.addSubview(subtitleLabel)
+        view.addSubview(privacyPolicyButton)
         view.addSubview(cancelButton)
 
         // Countdown ring is drawn as the cancel button’s leading image via configuration.
@@ -136,6 +154,10 @@ import UIKit
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+
+            privacyPolicyButton.topAnchor.constraint(greaterThanOrEqualTo: subtitleLabel.bottomAnchor, constant: 12),
+            privacyPolicyButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            privacyPolicyButton.bottomAnchor.constraint(equalTo: cancelButton.topAnchor, constant: -20),
 
             cancelButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             cancelButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -40),
@@ -206,6 +228,7 @@ import UIKit
         phase = .deleting
         stopCountdown()
         cancelButton.isEnabled = false
+        privacyPolicyButton.isHidden = true
         subtitleLabel.text = NSLocalizedString("Removing your account…", comment: "")
         var configuration = cancelButton.configuration
         configuration?.title = NSLocalizedString("Deleting…", comment: "").uppercased()
@@ -228,6 +251,7 @@ import UIKit
                     alreadyRetired: alreadyRetired
                 )
                 self.cancelButton.isHidden = true
+                self.privacyPolicyButton.isHidden = true
                 // Slightly longer hold when the anonymized name is shown.
                 let hold: TimeInterval = (anonymizedDisplayName != nil) ? 2.4 : 1.6
                 DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
@@ -248,6 +272,7 @@ import UIKit
         shredderView.stopAnimating()
         titleLabel.text = title
         subtitleLabel.text = message
+        privacyPolicyButton.isHidden = true
         cancelButton.isEnabled = true
         var configuration = cancelButton.configuration
         configuration?.showsActivityIndicator = false
@@ -284,6 +309,10 @@ import UIKit
                 }
             }
         }
+    }
+
+    @objc private func privacyPolicyTapped() {
+        SumbaDeleteAccountCopy.openPrivacyPolicy(from: self, userId: account.userId)
     }
 
     @objc private func cancelTapped() {

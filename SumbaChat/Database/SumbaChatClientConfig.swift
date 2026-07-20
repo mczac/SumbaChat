@@ -62,9 +62,14 @@ enum SumbaChatClientConfig {
     private(set) static var lastPolicy: UpdatePolicy?
     private(set) static var accountRetire: AccountRetireCapability?
 
-    /// Gate for `DELETE …/talk_upload_policy/api/v1/account`.
+    /// Gate for in-app Delete account UI and `DELETE …/talk_upload_policy/api/v1/account`.
     static var accountRetireSupported: Bool {
         accountRetire?.enabled == true
+    }
+
+    /// When true, delete-account copy explains that project messages/files stay archived (Privacy Policy §5C).
+    static var accountRetireRetainsProjectData: Bool {
+        accountRetire?.retainsProjectData ?? true
     }
 
     /// Label used in delete-account UI copy (capability, else default).

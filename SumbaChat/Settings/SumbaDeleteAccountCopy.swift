@@ -8,59 +8,98 @@ import UIKit
 
 /// Shared delete-account copy and Privacy Policy link (URL from gitignored `NCAppBrandingLocal.h` → `privacyURL`).
 ///
-/// App Review notes (paste-ready):
-/// Account deletion: Settings → Account → Delete account. User confirms password; server revokes
-/// access and removes personal profile data. Project messages and shared files remain on our
-/// private Nextcloud archive under an anonymized label (“Former Team Member”), as stated in the
-/// Privacy Policy URL configured in NCAppBrandingLocal.h (`privacyURL`).
+/// Account deletion: Settings → Account → Delete account (when `accountRetire.enabled`).
+/// User confirms password; server retires via `talk_upload_policy` and revokes the session.
+/// Wording aligned with Privacy Policy §5B (profile/access removal) and §5C (project archive retention).
 enum SumbaDeleteAccountCopy {
 
     private static var labelPrefix: String {
         SumbaChatClientConfig.anonymizedLabelPrefix
     }
 
-    /// Footnote under the Account screen delete button (aligned with Privacy Policy).
-    static var accountScreenFootnote: String {
-        String(
+    private static var retainsProjectData: Bool {
+        SumbaChatClientConfig.accountRetireRetainsProjectData
+    }
+
+    /// Privacy Policy §5B — profile fields removed and access revoked.
+    private static var profileRemovalSummary: String {
+        NSLocalizedString(
+            "Your profile (name, email, avatar) and login access will be removed immediately.",
+            comment: "Delete account: profile and access removal (Privacy Policy §5B)"
+        )
+    }
+
+    /// Privacy Policy §5C — archived contributions stay visible under anonymized label.
+    private static func archiveRetentionDetail() -> String? {
+        guard retainsProjectData else { return nil }
+        return String(
             format: NSLocalizedString(
                 """
-                All your personal identifiable data will be deleted immediately. Shared project messages and files stay archived under “%@”, as described in our Privacy Policy.
+                Messages and files you contributed to project chats stay in the archive under “%@”. The text and files you shared remain visible to other participants, disassociated from your name.
                 """,
-                comment: "Delete account footnote on Account screen; %@ is anonymized label prefix"
+                comment: "Delete account: project archive retention; %@ is anonymized label prefix (Privacy Policy §5C)"
             ),
             labelPrefix
         )
+    }
+
+    private static func joinedParagraphs(_ parts: [String?]) -> String {
+        parts
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    /// Footnote under the Account screen delete button (aligned with Privacy Policy).
+    static var accountScreenFootnote: String {
+        joinedParagraphs([
+            profileRemovalSummary,
+            archiveRetentionDetail(),
+            NSLocalizedString(
+                "See our Privacy Policy for details.",
+                comment: "Delete account footnote privacy pointer"
+            )
+        ])
     }
 
     /// Pre-flow alert body (Settings → Account → Delete account).
     static var preflowMessage: String {
-        String(
-            format: NSLocalizedString(
-                """
-                All your personal identifiable data will be deleted immediately. Access to SumbaChat is revoked.
-                Messages and files you contributed to project repositories remain archived under “%@”, as described in our Privacy Policy.
-                """,
-                comment: "Delete account pre-flow alert; %@ is anonymized label prefix"
-            ),
-            labelPrefix
-        )
+        joinedParagraphs([
+            profileRemovalSummary,
+            archiveRetentionDetail(),
+            NSLocalizedString(
+                "This cannot be undone. See our Privacy Policy for details.",
+                comment: "Delete account pre-flow irreversibility + privacy pointer"
+            )
+        ])
     }
 
     /// Short retention bullet for password + countdown screens (not deleted yet).
     static var retentionBullet: String {
-        String(
-            format: NSLocalizedString(
-                "If you continue, all your personal identifiable data will be deleted immediately. Shared project messages and files will stay archived under “%@”.",
-                comment: "Delete account short retention notice before deletion; %@ is anonymized label prefix"
+        joinedParagraphs([
+            String(
+                format: NSLocalizedString(
+                    "If you continue, %@",
+                    comment: "Delete account retention lead-in; %@ is profile removal summary"
+                ),
+                profileRemovalSummary
             ),
-            labelPrefix
-        )
+            archiveRetentionDetail()
+        ])
     }
 
-    static let successMessage = NSLocalizedString(
-        "Your account has been deleted. You no longer have access. Shared project content remains archived under an anonymized name.",
-        comment: "Delete account success"
-    )
+    static var successMessage: String {
+        if retainsProjectData {
+            return NSLocalizedString(
+                "Your account has been deleted. You no longer have access. Shared project content remains in the archive under an anonymized name.",
+                comment: "Delete account success when project data is retained"
+            )
+        }
+        return NSLocalizedString(
+            "Your account has been deleted. You no longer have access.",
+            comment: "Delete account success when project data is not retained"
+        )
+    }
 
     static let alreadyRetiredMessage = NSLocalizedString(
         "This account was already deleted.",
@@ -83,7 +122,9 @@ enum SumbaDeleteAccountCopy {
 
     static func successSubtitle(anonymizedDisplayName: String?, alreadyRetired: Bool) -> String {
         var parts: [String] = [alreadyRetired ? alreadyRetiredMessage : successMessage]
-        if let name = anonymizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+        if retainsProjectData,
+           let name = anonymizedDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
             parts.append(String(
                 format: NSLocalizedString(
                     "Archived as “%@”.",

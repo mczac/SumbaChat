@@ -822,6 +822,8 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         let settingsSection = sections[section]
 
         switch settingsSection {
+        case SettingsSection.kSettingsSectionUserStatus.rawValue:
+            return NSLocalizedString("Status", comment: "Settings section header for online presence")
         case SettingsSection.kSettingsSectionOtherAccounts.rawValue:
             return NSLocalizedString("Other accounts", comment: "")
         case SettingsSection.kSettingsSectionConfiguration.rawValue:
@@ -842,9 +844,18 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
     }
 
     private func aboutCopyrightFooterText() -> String {
-        let version = NCAppBranding.getAppVersionString() ?? ""
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-        return "Sumba Chat version \(version), build \(build)\n\(copyright)\n\(licenseNotice)"
+        [talkAppName, licenseNotice, copyright].joined(separator: "\n")
+    }
+
+    private func githubFooterLinkTitle() -> String {
+        guard let url = URL(string: sourceCodeURL), let host = url.host else {
+            return NSLocalizedString("Source on GitHub", comment: "Settings footer link when URL missing")
+        }
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if path.isEmpty {
+            return host
+        }
+        return "\(host)/\(path)"
     }
 
     private func aboutCopyrightFooterAttributes() -> [NSAttributedString.Key: Any] {
@@ -873,29 +884,74 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
             attributes: aboutCopyrightFooterAttributes(),
             context: nil
         )
-        return ceil(bounding.height) + 24
+        return ceil(bounding.height) + 24 + 28
     }
 
-    override func tableView(_ tableView: UITableView, willDisplayFooterView view: UIView, forSection section: Int) {
+    override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
         let sections = getSettingsSections()
         guard section < sections.count,
-              sections[section] == SettingsSection.kSettingsSectionAbout.rawValue,
-              let footer = view as? UITableViewHeaderFooterView else { return }
+              sections[section] == SettingsSection.kSettingsSectionAbout.rawValue else {
+            return nil
+        }
+        return makeAboutSectionFooterView()
+    }
 
-        footer.textLabel?.numberOfLines = 0
-        footer.textLabel?.attributedText = NSAttributedString(
+    private func makeAboutSectionFooterView() -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        let textLabel = UILabel()
+        textLabel.translatesAutoresizingMaskIntoConstraints = false
+        textLabel.numberOfLines = 0
+        textLabel.textAlignment = .center
+        textLabel.attributedText = NSAttributedString(
             string: aboutCopyrightFooterText(),
             attributes: aboutCopyrightFooterAttributes()
         )
+
+        var linkConfiguration = UIButton.Configuration.plain()
+        linkConfiguration.title = githubFooterLinkTitle()
+        linkConfiguration.baseForegroundColor = .link
+        linkConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0)
+        linkConfiguration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .preferredFont(forTextStyle: .footnote)
+            attributes.underlineStyle = .single
+            return attributes
+        }
+        let githubButton = UIButton(configuration: linkConfiguration)
+        githubButton.translatesAutoresizingMaskIntoConstraints = false
+        githubButton.addTarget(self, action: #selector(openSourceCodeFromFooter), for: .touchUpInside)
+
+        container.addSubview(textLabel)
+        container.addSubview(githubButton)
+
+        NSLayoutConstraint.activate([
+            textLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            textLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            textLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+
+            githubButton.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 4),
+            githubButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            githubButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
+        ])
+
+        return container
+    }
+
+    @objc private func openSourceCodeFromFooter() {
+        openSourceCodeInBrowser()
+    }
+
+    private func openSourceCodeInBrowser() {
+        if let url = URL(string: sourceCodeURL), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            present(SFSafariViewController(url: url), animated: true)
+        }
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         let sections = getSettingsSections()
         let settingsSection = sections[section]
-
-        if settingsSection == SettingsSection.kSettingsSectionAbout.rawValue {
-            return aboutCopyrightFooterText()
-        }
 
         if settingsSection == SettingsSection.kSettingsSectionAccountSettings.rawValue && contactSyncSwitch.isOn {
             if NCContactsManager.sharedInstance().isContactAccessDetermined() && !NCContactsManager.sharedInstance().isContactAccessAuthorized() {
@@ -1077,10 +1133,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
             let contactVC = SumbaContactUsViewController(account: activeAccount)
             navigationController?.pushViewController(contactVC, animated: true)
         case AboutSection.kAboutSectionSourceCode.rawValue:
-            if let url = URL(string: sourceCodeURL), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                let safariVC = SFSafariViewController(url: url)
-                self.present(safariVC, animated: true, completion: nil)
-            }
+            openSourceCodeInBrowser()
         default:
             break
         }

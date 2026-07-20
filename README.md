@@ -19,7 +19,7 @@ This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstr
 
 - [Nextcloud server](https://github.com/nextcloud/server) version 22 or higher (ATS-compatible HTTPS).
 - [Nextcloud Talk](https://github.com/nextcloud/spreed) (spreed) version 12.0 or higher.
-- For in-app account deletion: [Drop Account](https://apps.nextcloud.com/apps/drop_account) enabled on the server.
+- For in-app account deletion: Talk Upload Policy retire enabled on the server (`spreed.config.sumbachat-client.accountRetire.enabled`).
 - [CocoaPods](https://cocoapods.org/)
 - Xcode with a valid Apple Developer team
 
@@ -48,7 +48,7 @@ Pull requests should stay SwiftLint-clean.
 - Switch server from the profile, with live `status.php` probes (online / maintenance / offline)
 - Forgot password flow
 - Contact us (mailto to the configured support address)
-- Delete account from Account screen (password → countdown → `talk_upload_policy` retire when `sumbachat-client.accountRetire.enabled`, else Drop Account fallback → local logout). Profile removed; shared project content stays archived under “Former Team Member” (see Privacy Policy)
+- Delete account from Account screen when `sumbachat-client.accountRetire.enabled` (password → countdown → `DELETE talk_upload_policy/api/v1/account` → local logout). Profile removed; shared project content stays archived under “Former Team Member” (see Privacy Policy)
 - Privacy policy URL comes from gitignored `NCAppBrandingLocal.h` (`privacyURL`); opens with `?uid=` set to a hex XOR of the Nextcloud user id
 - Source code link to the SumbaChat GitHub repository
 - Online presence restore for branded clients (including first login when no user-status row exists yet)

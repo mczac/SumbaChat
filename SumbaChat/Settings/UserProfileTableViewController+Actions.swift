@@ -73,8 +73,10 @@ extension UserProfileTableViewController {
         }
     }
 
-    /// Password confirmation → countdown → retire / Drop Account API → local logout.
+    /// Password confirmation → countdown → talk_upload_policy retire → local logout.
     func presentDeleteAccountFlow() {
+        guard SumbaChatClientConfig.accountRetireSupported else { return }
+
         let alert = UIAlertController(
             title: NSLocalizedString("Delete account", comment: ""),
             message: SumbaDeleteAccountCopy.preflowMessage,

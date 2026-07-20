@@ -130,8 +130,9 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
         tableView.keyboardDismissMode = UIScrollView.KeyboardDismissMode.onDrag
         tableView.register(TextFieldTableViewCell.self, forCellReuseIdentifier: TextFieldTableViewCell.identifier)
         NotificationCenter.default.addObserver(self, selector: #selector(userProfileImageUpdated), name: NSNotification.Name.NCUserProfileImageUpdated, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(accountRetireCapabilitiesUpdated), name: .NCServerCapabilitiesUpdated, object: nil)
 
-        setupDeleteAccountFooter()
+        refreshDeleteAccountFooter()
 
         if navigationController?.viewControllers.first == self {
             let barButtonItem = UIBarButtonItem(title: nil, style: .plain, target: nil, action: nil)
@@ -145,6 +146,11 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         refreshServerReachability()
+        refreshAccountRetireCapabilities()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLayoutSubviews() {
@@ -156,6 +162,58 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
         labelFrame.origin.x = padding
         labelFrame.size.width = self.tableView.bounds.size.width - padding * 2
         headerView.nameLabel?.frame = labelFrame
+
+        updateDeleteAccountFooterInset()
+    }
+
+    private var isDeleteAccountAvailable: Bool {
+        SumbaChatClientConfig.accountRetireSupported
+    }
+
+    @objc private func accountRetireCapabilitiesUpdated() {
+        refreshDeleteAccountFooter()
+    }
+
+    private func refreshAccountRetireCapabilities() {
+        NCSettingsController.sharedInstance().getCapabilitiesForAccountId(account.accountId) { [weak self] _ in
+            self?.refreshDeleteAccountFooter()
+        }
+    }
+
+    private func ensureDeleteAccountFooterInstalled() {
+        guard deleteAccountFooterStack.superview == nil else { return }
+
+        view.addSubview(deleteAccountFooterStack)
+
+        NSLayoutConstraint.activate([
+            deleteAccountFooterStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            deleteAccountFooterStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            deleteAccountFooterStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            deleteAccountButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+
+    private func refreshDeleteAccountFooter() {
+        deleteAccountFootnoteLabel.text = SumbaDeleteAccountCopy.accountScreenFootnote
+
+        if isDeleteAccountAvailable {
+            ensureDeleteAccountFooterInstalled()
+            deleteAccountFooterStack.isHidden = false
+        } else {
+            deleteAccountFooterStack.isHidden = true
+        }
+
+        updateDeleteAccountFooterInset()
+    }
+
+    private func updateDeleteAccountFooterInset() {
+        guard isDeleteAccountAvailable, deleteAccountFooterStack.superview != nil else {
+            if tableView.contentInset.bottom != 0 {
+                tableView.contentInset.bottom = 0
+                tableView.verticalScrollIndicatorInsets.bottom = 0
+            }
+            return
+        }
 
         let footerHeight = deleteAccountFooterStack.bounds.height + 24
         if abs(tableView.contentInset.bottom - footerHeight) > 0.5 {
@@ -295,21 +353,8 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
         return UITableViewCell()
     }
 
-    private func setupDeleteAccountFooter() {
-        view.addSubview(deleteAccountFooterStack)
-
-        NSLayoutConstraint.activate([
-            deleteAccountFooterStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
-            deleteAccountFooterStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
-            deleteAccountFooterStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            deleteAccountButton.heightAnchor.constraint(equalToConstant: 50)
-        ])
-
-        tableView.contentInset.bottom = 140
-        tableView.verticalScrollIndicatorInsets.bottom = 140
-    }
-
     @objc private func deleteAccountButtonTapped() {
+        guard isDeleteAccountAvailable else { return }
         presentDeleteAccountFlow()
     }
 
