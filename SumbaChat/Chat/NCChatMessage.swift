@@ -213,18 +213,14 @@ import SwiftyAttributes
 
     /// Text shown under file/album previews — strips synthetic album push captions and `{file}`.
     public var chatBodyAttributedText: NSAttributedString? {
-        if SumbaMediaAlbumReference.parse(self.referenceId) != nil || self.sumbaIsAlbumPrimary {
-            let raw = (self.message as String?)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(self.message), userCaption == raw {
-                return self.parsedMarkdownForChat()
+        if SumbaMediaAlbumReference.parse(self.referenceId) != nil {
+            guard let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(self.message),
+                  !userCaption.isEmpty,
+                  let captionMessage = self.copy() as? NCChatMessage else {
+                return nil
             }
-            if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(self.message) {
-                let attributed = NSMutableAttributedString(string: userCaption)
-                return self.isMarkdownMessage
-                    ? SwiftMarkdownObjCBridge.parseMarkdown(markdownString: attributed)
-                    : attributed
-            }
-            return nil
+            captionMessage.message = userCaption
+            return captionMessage.parsedMarkdownForChat()
         }
         if self.message == "{file}", self.file() != nil {
             return nil
@@ -234,7 +230,7 @@ import SwiftyAttributes
 
     /// Text to pre-fill the edit composer — strips album push captions and `{file}` placeholders.
     public var editableCaptionText: String {
-        if SumbaMediaAlbumReference.parse(self.referenceId) != nil || self.sumbaIsAlbumPrimary {
+        if SumbaMediaAlbumReference.parse(self.referenceId) != nil {
             return SumbaMediaAlbumReference.cleanedUserCaption(self.message) ?? ""
         }
         if self.message == "{file}", self.file() != nil {

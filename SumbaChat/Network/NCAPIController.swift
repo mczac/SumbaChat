@@ -45,8 +45,9 @@ class NCAPIController: NSObject, NKCommonDelegate {
     private var calDAVSessionManagers = NSCache<NSString, NCCalDAVSessionManager>()
 
     /// Coalesces concurrent attachment-folder PROPFIND/MKCOL for the same account (parallel PUT 404 retries).
+    private typealias AttachmentFolderCompletion = (_ created: Bool, _ statusCode: Int) -> Void
     private let attachmentFolderLock = NSLock()
-    private var attachmentFolderWaiters = [String: [(_ created: Bool, _ statusCode: Int) -> Void]]()
+    private var attachmentFolderWaiters = [String: [AttachmentFolderCompletion]]()
 
     enum ApiControllerError: Error {
         case preconditionError
@@ -177,11 +178,13 @@ class NCAPIController: NSObject, NKCommonDelegate {
         NextcloudKit.shared.setup(account: account.accountId, user: account.user, userId: account.userId, password: token, urlBase: account.server, userAgent: NCAppBranding.userAgent(), nextcloudVersion: serverCapabilities.versionMajor, delegate: self)
     }
 
+    private static let previewURLCacheMemoryCapacity = 20 * 1024 * 1024
+    private static let previewURLCacheDiskCapacity = 100 * 1024 * 1024
+
     private func initImageDownloaders() {
         // The defaults for the shared url cache are very low, use some sane values for caching. Apple only caches assets <= 5% of the available space.
         // Otherwise some (user) avatars will never be cached and always requested
-        let sharedURLCache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 100 * 1024 * 1024)
-        URLCache.shared = sharedURLCache
+        URLCache.shared = Self.makePreviewURLCache()
 
         // By default SDWebImageDownloader defaults to 6 concurrent downloads (see SDWebImageDownloaderConfig)
 
@@ -201,6 +204,36 @@ class NCAPIController: NSObject, NKCommonDelegate {
         SDImageCache.shared.config.shouldRemoveExpiredDataWhenTerminate = false
         SDImageCache.shared.config.shouldRemoveExpiredDataWhenEnterBackground = false
         SDWebImageDownloader.shared.setValue(NCAppBranding.userAgent(), forHTTPHeaderField: "User-Agent")
+    }
+
+    private static func makePreviewURLCache() -> URLCache {
+        URLCache(memoryCapacity: previewURLCacheMemoryCapacity, diskCapacity: previewURLCacheDiskCapacity)
+    }
+
+    /// Clears SDWebImage + shared URLCache used for avatars and chat previews (Settings → System previews).
+    public func clearSystemPreviewCaches(completion: @escaping () -> Void) {
+        let sdBefore = SDImageCache.shared.totalDiskSize()
+        let urlBefore = URLCache.shared.currentDiskUsage
+
+        SDWebImageManager.shared.cancelAll()
+        SDImageCache.shared.clearMemory()
+        URLCache.shared.removeAllCachedResponses()
+        // Fresh URLCache so `currentDiskUsage` matches an empty store (removeAll alone can leave stale totals).
+        URLCache.shared = Self.makePreviewURLCache()
+
+        SDImageCache.shared.clearDisk {
+            let sdAfter = SDImageCache.shared.totalDiskSize()
+            let urlAfter = URLCache.shared.currentDiskUsage
+            NCLog.log(String(format:
+                "MediaUploadTrace: CACHE clear system-previews sd %.2fMB→%.2fMB url %.2fMB→%.2fMB",
+                Double(sdBefore) / 1_048_576.0,
+                Double(sdAfter) / 1_048_576.0,
+                Double(urlBefore) / 1_048_576.0,
+                Double(urlAfter) / 1_048_576.0))
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
     }
 
     private func getRequestModifier(forAccount account: TalkAccount) -> SDWebImageDownloaderRequestModifier? {

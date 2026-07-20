@@ -493,13 +493,8 @@ final class CachingSettingsViewController: UITableViewController, UITextFieldDel
                         MediaUploadDiskStore.formatCacheBytes(previewsBytes)
                     )
                 ) { [weak self] in
-                    URLCache.shared.removeAllCachedResponses()
-                    SDImageCache.shared.clearMemory()
-                    SDImageCache.shared.clearDisk {
-                        MediaUploadTrace.log("CACHE clear system-previews (SDImageCache + URLCache)")
-                        DispatchQueue.main.async {
-                            self?.reloadAfterClear()
-                        }
+                    NCAPIController.sharedInstance().clearSystemPreviewCaches {
+                        self?.reloadAfterClear()
                     }
                 }
             }
