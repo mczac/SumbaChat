@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -106,20 +106,22 @@ import UIKit
         let identity = [displayName.isEmpty ? user : displayName, host]
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
+        let cancelHint: String
         if identity.isEmpty {
-            subtitleLabel.text = NSLocalizedString(
-                "We are deleting this account. You can still cancel before the countdown ends. This cannot be undone.",
-                comment: "Delete account countdown subtitle"
+            cancelHint = NSLocalizedString(
+                "You can still cancel before the countdown ends.",
+                comment: "Delete account countdown cancel hint"
             )
         } else {
-            subtitleLabel.text = String(
+            cancelHint = String(
                 format: NSLocalizedString(
-                    "Deleting “%@”. You can still cancel before the countdown ends. This cannot be undone.",
-                    comment: "Delete account countdown subtitle with account identity"
+                    "Deleting “%@”. You can still cancel before the countdown ends.",
+                    comment: "Delete account countdown cancel hint with identity"
                 ),
                 identity
             )
         }
+        subtitleLabel.text = [cancelHint, SumbaDeleteAccountCopy.retentionBullet].joined(separator: "\n\n")
 
         NSLayoutConstraint.activate([
             shredderView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -216,14 +218,19 @@ import UIKit
         SumbaDeleteAccountService.deleteAccount(account: account, password: password) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .deleted:
-                NCLog.log("Delete account: UI success — logging out \(accountId)")
+            case .deleted(let anonymizedDisplayName, let alreadyRetired):
+                NCLog.log("Delete account: UI success — logging out \(accountId) alreadyRetired=\(alreadyRetired)")
                 self.phase = .finished
                 self.shredderView.playFinish()
                 self.titleLabel.text = NSLocalizedString("Account deleted", comment: "")
-                self.subtitleLabel.text = NSLocalizedString("Your data was completely removed.", comment: "")
+                self.subtitleLabel.text = SumbaDeleteAccountCopy.successSubtitle(
+                    anonymizedDisplayName: anonymizedDisplayName,
+                    alreadyRetired: alreadyRetired
+                )
                 self.cancelButton.isHidden = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                // Slightly longer hold when the anonymized name is shown.
+                let hold: TimeInterval = (anonymizedDisplayName != nil) ? 2.4 : 1.6
+                DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
                     self.logoutAndDismiss()
                 }
             case .failed(let message):

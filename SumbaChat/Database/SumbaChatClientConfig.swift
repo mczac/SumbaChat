@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -15,12 +15,22 @@ extension Notification.Name {
 ///
 /// Example:
 /// ```json
-/// { "minIosBuild": 30, "latestIosBuild": 36, "app": "1234567890" }
+/// {
+///   "minIosBuild": 30,
+///   "latestIosBuild": 36,
+///   "app": "1234567890",
+///   "accountRetire": {
+///     "enabled": true,
+///     "anonymizedLabelPrefix": "Former Team Member",
+///     "retainsProjectData": true
+///   }
+/// }
 /// ```
 /// `app` may be an App Store numeric id or a full `https://` / `itms-apps://` URL.
 enum SumbaChatClientConfig {
 
     private static let dismissedRecommendedBuildKey = "sumbaChatDismissedRecommendedBuild"
+    private static let defaultAnonymizedLabelPrefix = "Former Team Member"
 
     struct UpdatePolicy: Equatable {
         let minIosBuild: Int
@@ -37,12 +47,35 @@ enum SumbaChatClientConfig {
         }
     }
 
+    /// `spreed.config.sumbachat-client.accountRetire`
+    struct AccountRetireCapability: Equatable {
+        let enabled: Bool
+        let anonymizedLabelPrefix: String
+        let retainsProjectData: Bool
+    }
+
     enum UpdateKind: Equatable {
         case mandatory(UpdatePolicy)
         case recommended(UpdatePolicy)
     }
 
     private(set) static var lastPolicy: UpdatePolicy?
+    private(set) static var accountRetire: AccountRetireCapability?
+
+    /// Gate for `DELETE …/talk_upload_policy/api/v1/account`.
+    static var accountRetireSupported: Bool {
+        accountRetire?.enabled == true
+    }
+
+    /// Label used in delete-account UI copy (capability, else default).
+    static var anonymizedLabelPrefix: String {
+        let prefix = accountRetire?.anonymizedLabelPrefix
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let prefix, !prefix.isEmpty {
+            return prefix
+        }
+        return defaultAnonymizedLabelPrefix
+    }
 
     /// Invoked from `NCDatabaseManager.setTalkCapabilities` (login + talk-hash refresh).
     static func applyIfPresent(from capabilitiesDict: [AnyHashable: Any]) {
@@ -53,8 +86,11 @@ enum SumbaChatClientConfig {
 
         guard let raw else {
             lastPolicy = nil
+            accountRetire = nil
             return
         }
+
+        accountRetire = parseAccountRetire(raw["accountRetire"])
 
         let minBuild = intValue(raw["minIosBuild"]) ?? 0
         let latestBuild = intValue(raw["latestIosBuild"]) ?? 0
@@ -102,10 +138,39 @@ enum SumbaChatClientConfig {
         UserDefaults.standard.set(policy.latestIosBuild, forKey: dismissedRecommendedBuildKey)
     }
 
+    private static func parseAccountRetire(_ any: Any?) -> AccountRetireCapability? {
+        guard let dict = any as? [String: Any] else { return nil }
+        let enabled = boolValue(dict["enabled"])
+        let prefix = (dict["anonymizedLabelPrefix"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let retains = dict["retainsProjectData"] == nil ? true : boolValue(dict["retainsProjectData"])
+        let resolvedPrefix: String
+        if let prefix, !prefix.isEmpty {
+            resolvedPrefix = prefix
+        } else {
+            resolvedPrefix = defaultAnonymizedLabelPrefix
+        }
+        return AccountRetireCapability(
+            enabled: enabled,
+            anonymizedLabelPrefix: resolvedPrefix,
+            retainsProjectData: retains
+        )
+    }
+
     private static func intValue(_ any: Any?) -> Int? {
         if let n = any as? Int { return n }
         if let n = any as? NSNumber { return n.intValue }
         if let s = any as? String { return Int(s) }
         return nil
+    }
+
+    private static func boolValue(_ any: Any?) -> Bool {
+        if let b = any as? Bool { return b }
+        if let n = any as? NSNumber { return n.boolValue }
+        if let s = any as? String {
+            let lowered = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return lowered == "1" || lowered == "true" || lowered == "yes"
+        }
+        return false
     }
 }

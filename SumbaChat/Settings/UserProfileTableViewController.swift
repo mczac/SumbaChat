@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2022 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -16,6 +16,7 @@ enum ProfileSection: Int {
     case kProfileSectionTwitter
     case kProfileSectionSummary
     case kProfileSectionRemoveAccount
+    case kProfileSectionDeleteAccount
 }
 
 enum SummaryRow: Int {
@@ -58,7 +59,7 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
 
         NCAppBranding.styleViewController(self)
 
-        self.navigationItem.title = NSLocalizedString("Profile", comment: "")
+        self.navigationItem.title = NSLocalizedString("Account", comment: "")
 
         self.tableView.tableHeaderView = self.avatarHeaderView()
         self.showEditButton()
@@ -144,6 +145,8 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
             return 40
         case ProfileSection.kProfileSectionSummary.rawValue:
             return 20
+        case ProfileSection.kProfileSectionDeleteAccount.rawValue:
+            return 24
         default:
             return 0
         }
@@ -227,6 +230,8 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
             let actionTitle = NSLocalizedString("Log out", comment: "")
             let actionImage = UIImage(systemName: "arrow.right.square")?.applyingSymbolConfiguration(iconConfiguration)
             return actionCellWith(identifier: "RemoveAccountCellIdentifier", text: actionTitle, textColor: .systemRed, image: actionImage, tintColor: .systemRed)
+        case ProfileSection.kProfileSectionDeleteAccount.rawValue:
+            return deleteAccountCell()
         default:
             break
         }
@@ -242,6 +247,8 @@ class UserProfileTableViewController: UITableViewController, DetailedOptionsSele
             } else {
                 self.showLogoutConfirmationDialog()
             }
+        } else if section == ProfileSection.kProfileSectionDeleteAccount.rawValue {
+            self.presentDeleteAccountFlow()
         } else if section == ProfileSection.kProfileSectionPhoneNumber.rawValue {
             self.presentSetPhoneNumberDialog()
         }
@@ -353,6 +360,28 @@ extension UserProfileTableViewController {
         actionCell.imageView?.tintColor = tintColor
 
         return actionCell
+    }
+
+    func deleteAccountCell() -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "DeleteAccountCellIdentifier")
+            ?? UITableViewCell(style: .subtitle, reuseIdentifier: "DeleteAccountCellIdentifier")
+        cell.textLabel?.text = NSLocalizedString("Delete account", comment: "")
+        cell.textLabel?.textColor = .systemRed
+        cell.textLabel?.numberOfLines = 1
+        cell.detailTextLabel?.text = String(
+            format: NSLocalizedString(
+                "Removes your profile; shared content stays as “%@”",
+                comment: "Delete account row subtitle; %@ is anonymized label prefix"
+            ),
+            SumbaChatClientConfig.anonymizedLabelPrefix
+        )
+        cell.detailTextLabel?.textColor = .secondaryLabel
+        cell.detailTextLabel?.numberOfLines = 2
+        let image = UIImage(systemName: "person.crop.circle.badge.minus")?.applyingSymbolConfiguration(iconConfiguration)
+        cell.imageView?.image = image?.withRenderingMode(.alwaysTemplate)
+        cell.imageView?.tintColor = .systemRed
+        cell.accessoryType = .disclosureIndicator
+        return cell
     }
 
     func switchServerCell() -> UITableViewCell {

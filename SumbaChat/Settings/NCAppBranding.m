@@ -1,6 +1,6 @@
 /**
  * SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
- * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -18,12 +18,13 @@
 #import "NCAppBrandingLocal.h"
 #else
 #define NC_BRANDING_DOMAIN @"https://cloud.example.com"
-#define NC_BRANDING_PRIVACY_URL @"https://cloud.example.com/privacy"
+#define NC_BRANDING_PRIVACY_URL @"https://cloud.example.com/privacy_po_example"
 #define NC_BRANDING_PUSH_SERVER @"https://push.example.com"
 #define NC_BRANDING_PUSH_SERVER_DEBUG @"https://push-dev.example.com"
 #define NC_BRANDING_BASE_DOMAIN @"example.com"
 #define NC_BRANDING_DEFAULT_SUBDOMAIN @"cloud"
 #define NC_BRANDING_SUPPORT_EMAIL @"support@example.com"
+#define NC_BRANDING_UID_XOR_KEY_HEX @""
 #endif
 
 #if !defined(NC_BRANDING_BASE_DOMAIN)
@@ -34,6 +35,9 @@
 #endif
 #if !defined(NC_BRANDING_SUPPORT_EMAIL)
 #define NC_BRANDING_SUPPORT_EMAIL @"support@example.com"
+#endif
+#if !defined(NC_BRANDING_UID_XOR_KEY_HEX)
+#define NC_BRANDING_UID_XOR_KEY_HEX @""
 #endif
 
 typedef enum NCTextColorStyle {
@@ -47,7 +51,7 @@ typedef enum NCTextColorStyle {
 
 NSString * const talkAppName = @"SumbaChat";
 NSString * const filesAppName = @"SumbaFiles";
-NSString * const copyright = @"© 2026 Ivan Cursoroff and Peter Zakharov";
+NSString * const copyright = @"© 2026 Peter Zakharov";
 NSString * const licenseNotice = @"Based on Nextcloud Talk, licensed under GPLv3";
 NSString * const bundleIdentifier = @"com.spl.SumbaChat";
 NSString * const groupIdentifier = @"group.com.spl.SumbaChat";
@@ -58,6 +62,8 @@ NSString * const pushNotificationServer = NC_BRANDING_PUSH_SERVER_DEBUG;
 NSString * const pushNotificationServer = NC_BRANDING_PUSH_SERVER;
 #endif
 NSString * const privacyURL = NC_BRANDING_PRIVACY_URL;
+NSString * const brandingUidXorKeyHex = NC_BRANDING_UID_XOR_KEY_HEX;
+NSString * const sourceCodeURL = @"https://github.com/mczac/SumbaChat";
 BOOL const isBrandedApp = YES;
 BOOL const multiAccountEnabled = YES;
 BOOL const useAppsGroup = NO;

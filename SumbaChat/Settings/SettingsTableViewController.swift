@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2022 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -46,7 +46,6 @@ enum AboutSection: Int {
     case kAboutSectionPrivacy = 0
     case kAboutSectionNotifications
     case kAboutSectionContactUs
-    case kAboutSectionDeleteAccount
     case kAboutSectionSourceCode
 }
 
@@ -378,12 +377,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         options.append(AboutSection.kAboutSectionPrivacy.rawValue)
         options.append(AboutSection.kAboutSectionNotifications.rawValue)
         options.append(AboutSection.kAboutSectionContactUs.rawValue)
-        options.append(AboutSection.kAboutSectionDeleteAccount.rawValue)
-
-        // Source code (non-branded builds only)
-        if !isBrandedApp.boolValue {
-            options.append(AboutSection.kAboutSectionSourceCode.rawValue)
-        }
+        options.append(AboutSection.kAboutSectionSourceCode.rawValue)
 
         return options
     }
@@ -837,7 +831,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         case SettingsSection.kSettingsSectionAdvanced.rawValue:
             return NSLocalizedString("Advanced", comment: "")
         case SettingsSection.kSettingsSectionAbout.rawValue:
-            return NSLocalizedString("Privacy & Personal Data", comment: "Settings section for privacy, notifications, contact us, and account deletion")
+            return NSLocalizedString("Privacy & Personal Data", comment: "Settings section for privacy, notifications, and contact us")
         default:
             return nil
         }
@@ -1069,7 +1063,9 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         let option = options[indexPath.row]
         switch option {
         case AboutSection.kAboutSectionPrivacy.rawValue:
-            if let url = URL(string: privacyURL), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            let userId = activeAccount.userId.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let url = SumbaPrivacyUidEncoder.privacyPolicyURL(baseURL: privacyURL, userId: userId.isEmpty ? nil : userId),
+               ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                 let safariVC = SFSafariViewController(url: url)
                 self.present(safariVC, animated: true, completion: nil)
             }
@@ -1078,54 +1074,14 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         case AboutSection.kAboutSectionContactUs.rawValue:
             let contactVC = SumbaContactUsViewController(account: activeAccount)
             navigationController?.pushViewController(contactVC, animated: true)
-        case AboutSection.kAboutSectionDeleteAccount.rawValue:
-            presentDeleteAccountFlow()
         case AboutSection.kAboutSectionSourceCode.rawValue:
-            let safariVC = SFSafariViewController(url: URL(string: "https://github.com/nextcloud/talk-ios")!)
-            self.present(safariVC, animated: true, completion: nil)
+            if let url = URL(string: sourceCodeURL), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                let safariVC = SFSafariViewController(url: url)
+                self.present(safariVC, animated: true, completion: nil)
+            }
         default:
             break
         }
-    }
-
-    /// Password confirmation → countdown cancel window → Drop Account API delete.
-    func presentDeleteAccountFlow() {
-        let account = activeAccount
-        let displayName = account.userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let user = account.user.trimmingCharacters(in: .whitespacesAndNewlines)
-        let host = SumbaServerConfiguration.displayHost(fromServerURL: account.server)
-        let identity = [displayName.isEmpty ? user : displayName, host]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-
-        let message: String
-        if identity.isEmpty {
-            message = NSLocalizedString(
-                "This permanently deletes your account and data from the server. This cannot be undone.",
-                comment: "Delete account confirmation"
-            )
-        } else {
-            message = String(
-                format: NSLocalizedString(
-                    "You are about to permanently delete “%@”. All chats, files, and account data will be removed from the server. This cannot be undone.",
-                    comment: "Delete account confirmation with account identity"
-                ),
-                identity
-            )
-        }
-
-        let alert = UIAlertController(
-            title: NSLocalizedString("Delete account", comment: ""),
-            message: message,
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: ""), style: .cancel))
-        alert.addAction(UIAlertAction(title: NSLocalizedString("Continue", comment: ""), style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            let passwordVC = SumbaDeleteAccountPasswordViewController(account: account)
-            self.navigationController?.pushViewController(passwordVC, animated: true)
-        })
-        present(alert, animated: true)
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -1407,18 +1363,9 @@ extension SettingsTableViewController {
             cell.accessoryType = .disclosureIndicator
             return cell
 
-        case AboutSection.kAboutSectionDeleteAccount.rawValue:
-            let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: "DeleteAccountCellIdentifier", style: .default)
-            cell.textLabel?.text = NSLocalizedString("Delete account", comment: "")
-            cell.textLabel?.textColor = .systemRed
-            cell.textLabel?.numberOfLines = 1
-            cell.setColoredSettingsIcon(systemName: "person.crop.circle.badge.minus", backgroundColor: SettingsIconColor.red)
-            cell.accessoryType = .disclosureIndicator
-            return cell
-
         case AboutSection.kAboutSectionSourceCode.rawValue:
             let cell: SettingsTableViewCell = tableView.dequeueOrCreateCell(withIdentifier: aboutCellIdentifier, style: .default)
-            cell.textLabel?.text = NSLocalizedString("Get source code", comment: "")
+            cell.textLabel?.text = NSLocalizedString("Source code", comment: "")
             cell.setColoredSettingsIcon(image: UIImage(named: "github"), backgroundColor: SettingsIconColor.purple)
             cell.accessoryType = .disclosureIndicator
             return cell

@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2022 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 

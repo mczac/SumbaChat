@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2022 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -71,6 +71,26 @@ extension UserProfileTableViewController {
             NCUserInterfaceController.sharedInstance().presentConversationsList()
             NCConnectionController.shared.checkAppState()
         }
+    }
+
+    /// Password confirmation → countdown → retire / Drop Account API → local logout.
+    func presentDeleteAccountFlow() {
+        let alert = UIAlertController(
+            title: NSLocalizedString("Delete account", comment: ""),
+            message: SumbaDeleteAccountCopy.preflowMessage,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: SumbaDeleteAccountCopy.privacyPolicyActionTitle, style: .default) { [weak self] _ in
+            guard let self else { return }
+            SumbaDeleteAccountCopy.openPrivacyPolicy(from: self, userId: self.account.userId)
+        })
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Continue", comment: ""), style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            let passwordVC = SumbaDeleteAccountPasswordViewController(account: self.account)
+            self.navigationController?.pushViewController(passwordVC, animated: true)
+        })
+        present(alert, animated: true)
     }
 
     func presentSetPhoneNumberDialog() {

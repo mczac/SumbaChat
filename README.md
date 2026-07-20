@@ -1,6 +1,6 @@
 <!--
   - SPDX-FileCopyrightText: 2017 Nextcloud GmbH and Nextcloud contributors
-  - SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+  - SPDX-FileCopyrightText: 2026 Peter Zakharov
   - SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <p align="center">
@@ -11,7 +11,7 @@
 
 **Chat, voice, and video for your own Nextcloud — iOS client**
 
-SumbaChat is an iOS messaging app based on [Nextcloud Talk](https://github.com/nextcloud/talk-ios). It keeps Talk’s on‑premises calls and chat, with SumbaChat branding and extras such as media upload compression and caching controls.
+SumbaChat is an iOS messaging app based on [Nextcloud Talk](https://github.com/nextcloud/talk-ios). It keeps Talk’s on‑premises calls and chat, with SumbaChat branding and extras such as media albums, upload compression, SumbaFiles browsing, and account management.
 
 This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstream Talk lives at [nextcloud/talk-ios](https://github.com/nextcloud/talk-ios).
 
@@ -19,6 +19,7 @@ This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstr
 
 - [Nextcloud server](https://github.com/nextcloud/server) version 22 or higher (ATS-compatible HTTPS).
 - [Nextcloud Talk](https://github.com/nextcloud/spreed) (spreed) version 12.0 or higher.
+- For in-app account deletion: [Drop Account](https://apps.nextcloud.com/apps/drop_account) enabled on the server.
 - [CocoaPods](https://cocoapods.org/)
 - Xcode with a valid Apple Developer team
 
@@ -33,7 +34,7 @@ This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstr
       SumbaChat/Settings/NCAppBrandingLocal.h
    ```
 
-   Edit `NCAppBrandingLocal.h` with your cloud and push-proxy URLs. That file is **gitignored** — never commit real hostnames.
+   Edit `NCAppBrandingLocal.h` with your cloud URL, push proxies, base domain, default subdomain, support email, and privacy `uid` XOR key. That file is **gitignored** — never commit real hostnames or keys. Without it, the app falls back to `example.com` placeholders.
 
 4. Bundle id / App Group are already set for SumbaChat (`com.spl.SumbaChat` / `group.com.spl.SumbaChat`). Use a team that can sign those identifiers, or change them in the Xcode targets and in `NCAppBranding.m` together.
 
@@ -41,16 +42,42 @@ Pull requests should stay SwiftLint-clean.
 
 ## Features beyond upstream Talk
 
-- SumbaChat branding and UI chrome (icon, splash, chat bar, share sheet)
-- Native username/password login for a locked domain (no Nextcloud web login flow)
+### Login & account
+
+- Native username/password login for a branded domain (subdomain field + fixed parent domain; no Nextcloud web login flow)
+- Switch server from the profile, with live `status.php` probes (online / maintenance / offline)
+- Forgot password flow
+- Contact us (mailto to the configured support address)
+- Delete account from Account screen (password → countdown → `talk_upload_policy` retire when `sumbachat-client.accountRetire.enabled`, else Drop Account fallback → local logout). Profile removed; shared project content stays archived under “Former Team Member” (see Privacy Policy)
+- Privacy policy URL comes from gitignored `NCAppBrandingLocal.h` (`privacyURL`); opens with `?uid=` set to a hex XOR of the Nextcloud user id
+- Source code link to the SumbaChat GitHub repository
+- Online presence restore for branded clients (including first login when no user-status row exists yet)
+
+### Media & gallery
+
+- Media albums: send a multi-photo/video selection as one gallery (chat album cell, room-list gallery icon)
+- Album push notifications: only the last member notifies; body uses a single caption such as `Hey (N media files)`
 - Photo/video upload compression (None / Automatic / Manual) with in-app and Share Extension UX
+- Writer-based video encode (default): keeps audio, per-profile AAC, retains GPS/capture date when possible; Automatic ladder picks a profile
 - App Group media cache (upload / download / convert) and Settings → Caching
-- Server-driven App Store update prompts via Talk capabilities (`config.sumbachat-client`: `minIosBuild` / `latestIosBuild` / `app`)
+- In-chat cache hit/miss indicator on file messages (local / warm cache / needs download)
+- Media viewer: plays with sound by default; on-screen mute control
+- Quick Look / SumbaFiles: middle-truncated long filenames
+
+### SumbaFiles & chat UX
+
+- SumbaFiles chooser: type filter (All / Video / Audio / Documents), search by name, size · relative date in each row
 - Chat keyboard & scroll: keep the latest messages above the composer
 - Calls: request mic/camera before join; refresh local media if permission is granted mid-call
-- Dedicated push proxies (via `NCAppBrandingLocal.h`) and system-announcement notification chrome
-- Media viewer: start muted with an on-screen mute control
-- SumbaFiles chooser: type filter (All / Video / Audio / Documents), search by name, middle-truncated filenames, and size · relative date in each row
+- Connection toasts: “Network available” only after a real disconnect (not on cold launch)
+
+### Branding & ops
+
+- SumbaChat branding and UI chrome (icon, splash, chat bar, share sheet)
+- Dedicated push proxies and system-announcement notification chrome (via `NCAppBrandingLocal.h`)
+- Server-driven App Store update prompts via Talk capabilities (`config.sumbachat-client`: `minIosBuild` / `latestIosBuild` / `app`)
+- Diagnostics and in-app logfile viewer (Settings)
+- Rate-limit friendly copy on login / forgot-password / delete-account (HTTP 429)
 
 See also [docs/notifications.md](docs/notifications.md) and [docs/local-modifications/media-upload-compression.md](docs/local-modifications/media-upload-compression.md).
 
@@ -89,5 +116,5 @@ SumbaChat is derived from [Nextcloud Talk for iOS](https://github.com/nextcloud/
 
 [GPLv3](LICENSE) with [Apple App Store exception](COPYING.iOS), same as upstream Talk.
 
-Copyright for SumbaChat modifications: © 2026 Ivan Cursoroff and Peter Zakharov.  
+Copyright for SumbaChat modifications: © 2026 Peter Zakharov.  
 Copyright for original Talk code: Nextcloud GmbH and Nextcloud contributors.

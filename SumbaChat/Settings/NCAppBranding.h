@@ -1,6 +1,6 @@
 /**
  * SPDX-FileCopyrightText: 2020 Nextcloud GmbH and Nextcloud contributors
- * SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+ * SPDX-FileCopyrightText: 2026 Peter Zakharov
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -21,6 +21,10 @@ extern NSString * const groupIdentifier;
 extern NSString * const appsGroupIdentifier;
 extern NSString * const pushNotificationServer;
 extern NSString * const privacyURL;
+/// Hex-encoded XOR key for privacy-policy `uid` (from gitignored local branding).
+extern NSString * const brandingUidXorKeyHex;
+/// Public GitHub repository for “Get source code”.
+extern NSString * const sourceCodeURL;
 extern BOOL const isBrandedApp;
 extern BOOL const multiAccountEnabled;
 extern BOOL const useAppsGroup;

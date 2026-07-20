@@ -1,6 +1,6 @@
 //
 // SPDX-FileCopyrightText: 2022 Nextcloud GmbH and Nextcloud contributors
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -51,6 +51,7 @@ extension UserProfileTableViewController {
             sections.append(ProfileSection.kProfileSectionSummary.rawValue)
         }
         sections.append(ProfileSection.kProfileSectionRemoveAccount.rawValue)
+        sections.append(ProfileSection.kProfileSectionDeleteAccount.rawValue)
         return sections
     }
 
@@ -78,7 +79,7 @@ extension UserProfileTableViewController {
 
     func showEditButton() {
         self.editButton = UIBarButtonItem(barButtonSystemItem: UIBarButtonItem.SystemItem.edit, target: self, action: #selector(editButtonPressed))
-        self.editButton.accessibilityHint = NSLocalizedString("Double tap to edit profile", comment: "")
+        self.editButton.accessibilityHint = NSLocalizedString("Double tap to edit account", comment: "")
         self.navigationItem.rightBarButtonItem = editButton
     }
 

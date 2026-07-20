@@ -1,5 +1,5 @@
 //
-// SPDX-FileCopyrightText: 2026 Ivan Cursoroff and Peter Zakharov
+// SPDX-FileCopyrightText: 2026 Peter Zakharov
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 
@@ -44,14 +44,27 @@ import UIKit
         let label = UILabel()
         label.font = .preferredFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
-        label.textColor = .systemRed
+        label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
-        label.text = NSLocalizedString(
-            "This permanently deletes all chats, files, and data. It cannot be undone.",
-            comment: "Delete account irreversible warning (short)"
-        )
+        label.text = SumbaDeleteAccountCopy.retentionBullet
         return label
+    }()
+
+    private lazy var privacyPolicyButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = SumbaDeleteAccountCopy.privacyPolicyActionTitle
+        configuration.baseForegroundColor = .link
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .preferredFont(forTextStyle: .footnote)
+            attributes.underlineStyle = .single
+            return attributes
+        }
+        let button = UIButton(configuration: configuration)
+        button.addTarget(self, action: #selector(privacyPolicyTapped), for: .touchUpInside)
+        return button
     }()
 
     private lazy var passwordTextField: UITextField = {
@@ -121,6 +134,8 @@ import UIKit
             accountHostLabel,
             makeGap(20),
             warningLabel,
+            makeGap(8),
+            privacyPolicyButton,
             makeGap(28),
             passwordTextField,
             makeGap(10),
@@ -218,6 +233,10 @@ import UIKit
 
     @objc private func dismissKeyboard() {
         view.endEditing(true)
+    }
+
+    @objc private func privacyPolicyTapped() {
+        SumbaDeleteAccountCopy.openPrivacyPolicy(from: self, userId: account.userId)
     }
 
     @objc private func passwordChanged() {
