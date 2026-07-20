@@ -9,6 +9,7 @@ extension BaseChatTableViewCell {
 
     func setupForFileCell(with message: NCChatMessage, with account: TalkAccount) {
         self.hideAlbumMosaicChrome()
+        self.filePreviewImageView?.isHidden = false
 
         if self.filePreviewImageView == nil {
             // Preview image view
@@ -87,13 +88,8 @@ extension BaseChatTableViewCell {
 
         self.rebindMessageTextViewBelowFilePreview(filePreviewImageView, messageTextView: messageTextView)
 
-        messageTextView.attributedText = message.parsedMarkdownForChat()
-
-        if message.message == "{file}" {
-            messageTextView.dataDetectorTypes = []
-        } else {
-            messageTextView.dataDetectorTypes = .all
-        }
+        messageTextView.attributedText = message.chatBodyAttributedText
+        messageTextView.dataDetectorTypes = (messageTextView.attributedText?.length ?? 0) > 0 ? .all : []
 
         self.requestPreview(for: message, with: account)
 

@@ -845,11 +845,12 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
         applyAppleStyleSectionHeader(view, title: self.tableView(tableView, titleForHeaderInSection: section))
     }
 
-    private func aboutVersionBuildLine() -> String {
+    private func aboutAppNameVersionBuildLine() -> String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         return String(
-            format: NSLocalizedString("Version %@ (%@)", comment: "Settings footer app version and build number"),
+            format: NSLocalizedString("%@ %@ (%@)", comment: "Settings footer: app name, version, and build number"),
+            talkAppName,
             version,
             build
         )
@@ -857,7 +858,7 @@ class SettingsTableViewController: UITableViewController, UITextFieldDelegate, U
 
     private func aboutCopyrightFooterAttributedText() -> NSAttributedString {
         let baseAttributes = aboutCopyrightFooterAttributes()
-        let lines = [talkAppName, aboutVersionBuildLine(), licenseNotice, copyright]
+        let lines = [aboutAppNameVersionBuildLine(), licenseNotice, copyright]
         let result = NSMutableAttributedString()
 
         for (index, line) in lines.enumerated() {

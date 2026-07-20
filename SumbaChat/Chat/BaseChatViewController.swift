@@ -512,6 +512,24 @@ import Toast
         self.isVisible = true
     }
 
+    /// Flush cached row heights and rebind visible cells after background/lock (prevents caption bleed/overlap).
+    internal func refreshChatTableLayoutAfterLifecycleChange() {
+        DispatchQueue.main.async {
+            guard self.isViewLoaded, let tableView = self.tableView else { return }
+            let wasAtBottom = self.shouldScrollOnNewMessages()
+            let offset = tableView.contentOffset
+            self.messageHeightCache.invalidateAll()
+            tableView.reloadData()
+            tableView.layoutIfNeeded()
+            if wasAtBottom {
+                tableView.slk_scrollToBottom(animated: false)
+                self.updateToolbar(animated: false)
+            } else {
+                tableView.contentOffset = offset
+            }
+        }
+    }
+
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
 
@@ -738,7 +756,15 @@ import Toast
             let isAtBottom = self.shouldScrollOnNewMessages()
             let keyDate = self.dateSections[indexPath.section]
             updatedMessage.isGroupMessage = message.isGroupMessage && message.actorType != "bots" && updatedMessage.lastEditTimestamp == 0
-            self.messages[keyDate]?[indexPath.row] = updatedMessage
+
+            let messageToStore: NCChatMessage
+            if let primary = SumbaMediaAlbum.replacingMember(in: message, with: updatedMessage) {
+                primary.isGroupMessage = updatedMessage.isGroupMessage
+                messageToStore = primary
+            } else {
+                messageToStore = updatedMessage
+            }
+            self.messages[keyDate]?[indexPath.row] = messageToStore
 
             // Check if there are any messages that reference our message as a parent -> these need to be reloaded as well
             if let visibleIndexPaths = self.tableView?.indexPathsForVisibleRows {
@@ -754,6 +780,7 @@ import Toast
             }
 
             self.messageHeightCache.removeHeight(forMessage: message)
+            self.messageHeightCache.removeHeight(forMessage: messageToStore)
             self.tableView?.beginUpdates()
             self.tableView?.reloadRows(at: reloadIndexPaths, with: .none)
             self.tableView?.endUpdates()
@@ -1471,12 +1498,7 @@ import Toast
             self.mentionsDict = message.mentionMessageParameters
             self.editingMessage = message
 
-            // For files without a caption we start with an empty text instead of "{file}"
-            if message.message == "{file}", message.file() != nil {
-                self.editText("")
-            } else {
-                self.editText(message.parsedMessage().string)
-            }
+            self.editText(message.editableCaptionText)
         }
     }
 
@@ -3515,7 +3537,8 @@ import Toast
 
         // Chat messages
         let isOwnMessage = message.isMessage(from: self.account.userId)
-        let messageString = message.parsedMarkdownForChat() ?? NSMutableAttributedString()
+        let messageString = message.chatBodyAttributedText.map { NSMutableAttributedString(attributedString: $0) }
+            ?? NSMutableAttributedString()
         var width = originalWidth
 
         if message.isSystemMessage {

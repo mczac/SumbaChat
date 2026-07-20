@@ -722,6 +722,7 @@ import SwiftUI
 
         // Check if new messages were added while the app was inactive (eg. via background-refresh)
         self.checkForNewStoredMessages()
+        self.refreshChatTableLayoutAfterLifecycleChange()
 
         if !self.offlineMode {
             NCRoomsManager.shared.joinRoom(self.room.token, forAccountId: self.account.accountId, forCall: false)

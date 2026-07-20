@@ -44,6 +44,10 @@ class NCAPIController: NSObject, NKCommonDelegate {
     private var longPollingApiSessionManagers = NSCache<NSString, NCAPISessionManager>()
     private var calDAVSessionManagers = NSCache<NSString, NCCalDAVSessionManager>()
 
+    /// Coalesces concurrent attachment-folder PROPFIND/MKCOL for the same account (parallel PUT 404 retries).
+    private let attachmentFolderLock = NSLock()
+    private var attachmentFolderWaiters = [String: [(_ created: Bool, _ statusCode: Int) -> Void]]()
+
     enum ApiControllerError: Error {
         case preconditionError
         case unexpectedOcsResponse
@@ -3130,6 +3134,30 @@ class NCAPIController: NSObject, NKCommonDelegate {
     }
 
     func checkOrCreateAttachmentFolder(forAccount account: TalkAccount, completionBlock: @escaping (_ created: Bool, _ statusCode: Int) -> Void) {
+        let accountId = account.accountId
+
+        self.attachmentFolderLock.lock()
+        if var waiters = self.attachmentFolderWaiters[accountId] {
+            waiters.append(completionBlock)
+            self.attachmentFolderWaiters[accountId] = waiters
+            self.attachmentFolderLock.unlock()
+            return
+        }
+        self.attachmentFolderWaiters[accountId] = [completionBlock]
+        self.attachmentFolderLock.unlock()
+
+        self.performCheckOrCreateAttachmentFolder(forAccount: account) { created, statusCode in
+            self.attachmentFolderLock.lock()
+            let waiters = self.attachmentFolderWaiters.removeValue(forKey: accountId) ?? []
+            self.attachmentFolderLock.unlock()
+            for waiter in waiters {
+                waiter(created, statusCode)
+            }
+        }
+    }
+
+    private func performCheckOrCreateAttachmentFolder(forAccount account: TalkAccount,
+                                                      completionBlock: @escaping (_ created: Bool, _ statusCode: Int) -> Void) {
         self.setupNCCommunication(forAccount: account)
 
         guard let attachmentFolderServerURL = self.attachmentFolderServerURL(forAccount: account) else {
@@ -3144,7 +3172,9 @@ class NCAPIController: NSObject, NKCommonDelegate {
                 completionBlock(true, 0)
             } else if error.errorCode == 404 {
                 NextcloudKit.shared.createFolder(serverUrlFileName: attachmentFolderServerURL, options: options) { _, _, _, createError in
-                    completionBlock(createError.errorCode == 0, createError.errorCode)
+                    // Another parallel caller may have created it first (409/405).
+                    let ok = createError.errorCode == 0 || createError.errorCode == 409 || createError.errorCode == 405
+                    completionBlock(ok, createError.errorCode)
                 }
             } else {
                 print("Error checking attachment folder: \(error.errorDescription)")

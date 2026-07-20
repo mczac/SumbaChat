@@ -86,23 +86,8 @@ extension BaseChatTableViewCell {
         self.albumMosaicWidthConstraint?.constant = mosaicSize.width
 
         guard let messageTextView = self.messageTextView else { return }
-        // Same body font as other chat messages. Only strip obsolete synthetic "N media files" caption prefixes.
-        let raw = (message.message as String?)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(message.message), userCaption == raw {
-            messageTextView.attributedText = message.parsedMarkdownForChat()
-            messageTextView.dataDetectorTypes = .all
-        } else if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(message.message) {
-            let attributed = NSMutableAttributedString(string: userCaption)
-            attributed.addAttribute(.font, value: UIFont.preferredFont(forTextStyle: .body), range: NSRange(location: 0, length: attributed.length))
-            attributed.addAttribute(.foregroundColor, value: UIColor.label, range: NSRange(location: 0, length: attributed.length))
-            messageTextView.attributedText = message.isMarkdownMessage
-                ? SwiftMarkdownObjCBridge.parseMarkdown(markdownString: attributed)
-                : attributed
-            messageTextView.dataDetectorTypes = .all
-        } else {
-            messageTextView.attributedText = nil
-            messageTextView.dataDetectorTypes = []
-        }
+        messageTextView.attributedText = message.chatBodyAttributedText
+        messageTextView.dataDetectorTypes = (messageTextView.attributedText?.length ?? 0) > 0 ? .all : []
 
         self.reloadAlbumMosaic(members: members, size: mosaicSize, account: account)
     }
@@ -114,7 +99,6 @@ extension BaseChatTableViewCell {
         self.albumTileRequests = []
         self.albumMosaicView?.subviews.forEach { $0.removeFromSuperview() }
         self.hideAlbumMosaicChrome()
-        self.filePreviewImageView?.isHidden = false
     }
 
     func hideAlbumMosaicChrome() {

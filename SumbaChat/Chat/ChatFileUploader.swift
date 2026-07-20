@@ -19,6 +19,43 @@ import NextcloudKit
 
         let activeAccount = NCDatabaseManager.sharedInstance().activeAccount()
 
+        let performUpload = {
+            Self.performUpload(localPath: localPath,
+                               fileServerURL: fileServerURL,
+                               fileServerPath: fileServerPath,
+                               draftPath: draftPath,
+                               talkMetaData: talkMetaData,
+                               temporaryMessage: temporaryMessage,
+                               room: room,
+                               activeAccount: activeAccount,
+                               completion: completion)
+        }
+
+        // Conversation draft folders are created by probeConversationAttachmentFolder.
+        // Standard Talk attachments live under attachmentsFolder — ensure once before PUT.
+        if draftPath == nil {
+            NCAPIController.sharedInstance().checkOrCreateAttachmentFolder(forAccount: activeAccount) { created, _ in
+                if created {
+                    performUpload()
+                } else {
+                    completion(404, "Failed to check or create attachment folder")
+                }
+            }
+        } else {
+            performUpload()
+        }
+    }
+
+    private static func performUpload(localPath: String,
+                                      fileServerURL: String,
+                                      fileServerPath: String,
+                                      draftPath: String?,
+                                      talkMetaData: [String: Any]?,
+                                      temporaryMessage: NCChatMessage?,
+                                      room: NCRoom,
+                                      activeAccount: TalkAccount,
+                                      completion: @escaping (Int, NSString?) -> Void) {
+
         NCAPIController.sharedInstance().setupNCCommunication(forAccount: activeAccount)
 
         NextcloudKit.shared.upload(serverUrlFileName: fileServerURL,
@@ -66,7 +103,15 @@ import NextcloudKit
             case 404, 409:
                 NCAPIController.sharedInstance().checkOrCreateAttachmentFolder(forAccount: activeAccount) { created, _ in
                     if created {
-                        uploadFile(localPath: localPath, fileServerURL: fileServerURL, fileServerPath: fileServerPath, talkMetaData: talkMetaData, temporaryMessage: temporaryMessage, room: room, completion: completion)
+                        Self.performUpload(localPath: localPath,
+                                           fileServerURL: fileServerURL,
+                                           fileServerPath: fileServerPath,
+                                           draftPath: draftPath,
+                                           talkMetaData: talkMetaData,
+                                           temporaryMessage: temporaryMessage,
+                                           room: room,
+                                           activeAccount: activeAccount,
+                                           completion: completion)
                     } else {
                         completion(404, "Failed to check or create attachment folder")
                     }

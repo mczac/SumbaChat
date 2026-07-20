@@ -177,6 +177,8 @@ class BaseChatTableViewCell: UITableViewCell, AudioPlayerViewDelegate, Reactions
         self.quotePart.isHidden = true
         self.referencePart.isHidden = true
         self.reactionPart.isHidden = true
+        self.messageBodyView.clipsToBounds = true
+        self.bubbleView.clipsToBounds = true
     }
 
     override func prepareForReuse() {
@@ -211,12 +213,23 @@ class BaseChatTableViewCell: UITableViewCell, AudioPlayerViewDelegate, Reactions
         self.prepareForReuseAlbumCell()
         self.prepareForReuseLocationCell()
         self.prepareForReuseAudioCell()
+        self.resetMessageBodyForReuse()
         self.removeCacheHitIndicator()
 
         if let replyGestureRecognizer {
             self.removeGestureRecognizer(replyGestureRecognizer)
             self.replyGestureRecognizer = nil
         }
+    }
+
+    /// Drop stale caption/preview state so album ↔ file reuse cannot paint into the next row.
+    private func resetMessageBodyForReuse() {
+        self.messageTextView?.attributedText = nil
+        self.messageTextView?.text = nil
+        self.titleLabel.text = nil
+        self.filePreviewImageView?.isHidden = false
+        self.filePreviewImageViewHeightConstraint?.constant = fileMessageCellFileMaxPreviewHeight
+        self.filePreviewImageViewWidthConstraint?.constant = fileMessageCellFileMaxPreviewWidth
     }
 
     // swiftlint:disable:next cyclomatic_complexity

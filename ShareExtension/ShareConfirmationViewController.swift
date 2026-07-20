@@ -1931,102 +1931,140 @@ import AVFoundation
             NCLog.log("Media upload: album \(albumUUID) count=\(albumCount) — parallel PUT, serial attach")
         }
 
-        for shareItem in uploadables {
-            let byteCount = (try? FileManager.default.attributesOfItem(atPath: shareItem.filePath)[.size] as? NSNumber)?.int64Value ?? 0
-            let uploadName = shareItem.fileName ?? "file"
-            let uploadPath = shareItem.filePath ?? "?"
-            NCLog.log("Media upload: uploading \(uploadName) (\(byteCount) bytes) from \(uploadPath)")
+        let launchParallelUploads = { [self] in
+            for shareItem in uploadables {
+                let byteCount = (try? FileManager.default.attributesOfItem(atPath: shareItem.filePath)[.size] as? NSNumber)?.int64Value ?? 0
+                let uploadName = shareItem.fileName ?? "file"
+                let uploadPath = shareItem.filePath ?? "?"
+                NCLog.log("Media upload: uploading \(uploadName) (\(byteCount) bytes) from \(uploadPath)")
 
-            self.uploadGroup.enter()
+                self.uploadGroup.enter()
 
-            if let draftFolderPath {
-                let fileExtension = shareItem.fileURL.pathExtension
-                let extensionSuffix = fileExtension.isEmpty ? "" : ".\(fileExtension)"
-                let tempName = UUID().uuidString + extensionSuffix
-                let draftPath = "\(draftFolderPath)/\(tempName)"
-                let fileServerPath = "/\(draftPath)"
+                if let draftFolderPath {
+                    let fileExtension = shareItem.fileURL.pathExtension
+                    let extensionSuffix = fileExtension.isEmpty ? "" : ".\(fileExtension)"
+                    let tempName = UUID().uuidString + extensionSuffix
+                    let draftPath = "\(draftFolderPath)/\(tempName)"
+                    let fileServerPath = "/\(draftPath)"
 
-                if let fileServerURL = NCAPIController.sharedInstance().serverFileURL(forfilePath: fileServerPath, forAccount: account) {
-                    self.uploadFile(to: fileServerURL, with: fileServerPath, draftFolderPath: draftPath, with: shareItem)
-                } else {
-                    NCLog.log("Error creating server path for upload")
-                    self.uploadErrors.append(NSLocalizedString("Couldn't prepare the upload. Try again.", comment: "User-facing missing server path"))
-                    self.markAlbumSlotUploadFailed(for: shareItem)
-                    self.uploadGroup.leave()
-                }
-            } else {
-                NCAPIController.sharedInstance().uniqueNameForFileUpload(withName: shareItem.fileName, isOriginalName: true, forAccount: self.account) { fileServerURL, fileServerPath, errorCode, errorDescription in
-                    if let fileServerURL, let fileServerPath {
-                        self.uploadFile(to: fileServerURL, with: fileServerPath, draftFolderPath: nil, with: shareItem)
+                    if let fileServerURL = NCAPIController.sharedInstance().serverFileURL(forfilePath: fileServerPath, forAccount: account) {
+                        self.uploadFile(to: fileServerURL, with: fileServerPath, draftFolderPath: draftPath, with: shareItem)
                     } else {
-                        NCLog.log(String(format: "Error finding unique upload name. code=%ld Error: %@", errorCode, errorDescription ?? "Unknown error"))
-                        // errorDescription is already user-facing from NCAPIController.
-                        self.uploadErrors.append(errorDescription ?? NCAPIController.userFacingFileUploadError(code: errorCode))
+                        NCLog.log("Error creating server path for upload")
+                        self.uploadErrors.append(NSLocalizedString("Couldn't prepare the upload. Try again.", comment: "User-facing missing server path"))
                         self.markAlbumSlotUploadFailed(for: shareItem)
                         self.uploadGroup.leave()
                     }
+                } else {
+                    NCAPIController.sharedInstance().uniqueNameForFileUpload(withName: shareItem.fileName, isOriginalName: true, forAccount: self.account) { fileServerURL, fileServerPath, errorCode, errorDescription in
+                        if let fileServerURL, let fileServerPath {
+                            self.uploadFile(to: fileServerURL, with: fileServerPath, draftFolderPath: nil, with: shareItem)
+                        } else {
+                            NCLog.log(String(format: "Error finding unique upload name. code=%ld Error: %@", errorCode, errorDescription ?? "Unknown error"))
+                            // errorDescription is already user-facing from NCAPIController.
+                            self.uploadErrors.append(errorDescription ?? NCAPIController.userFacingFileUploadError(code: errorCode))
+                            self.markAlbumSlotUploadFailed(for: shareItem)
+                            self.uploadGroup.leave()
+                        }
+                    }
                 }
+            }
+
+            self.uploadGroup.notify(queue: .main) {
+                self.isUploadingMedia = false
+                self.isPreparingForUpload = false
+                self.uploadTasks.removeAll()
+                self.albumShareSession = nil
+
+                let settle: () -> Void = { [weak self] in
+                    guard let self else { return }
+                    // Instant dismiss so the branded card cannot flash into the next share session.
+                    self.hideProgressAlert(animated: false)
+
+                    if self.mediaFlowCancelled {
+                        NCLog.log("Media upload: upload group finished after cancel — suppressing result UI")
+                        self.hideProgressAlert(animated: false)
+                        if self.composeDismissedForUpload {
+                            // In-app: compose already gone — finish leave cleanup.
+                            self.isInSendProgressMode = false
+                            self.restoreExtensionProgressChromeIfNeeded()
+                            self.releaseUploadRetention()
+                        } else if self.isInSendProgressMode {
+                            // Race: cancel path hadn't restored compose yet.
+                            self.exitSendProgressMode()
+                        } else {
+                            self.restoreExtensionProgressChromeIfNeeded()
+                        }
+                        self.mediaFlowCancelled = false
+                        self.updateSendButtonEnabledState()
+                        bgTask.stopBackgroundTask()
+                        return
+                    }
+
+                    // TODO: Do error reporting per item
+                    if self.uploadErrors.isEmpty {
+                        self.isInSendProgressMode = false
+                        self.finishingSuccessfulUpload = true
+                        self.shareItemController.removeAllItems()
+                        self.finishingSuccessfulUpload = false
+                        MediaUploadHaptics.uploadSucceeded()
+                        self.releaseUploadRetention()
+                        self.delegate?.shareConfirmationViewControllerDidFinish(self)
+                    } else if self.composeDismissedForUpload {
+                        // Compose sheet already gone — surface the error on the chat host.
+                        self.isInSendProgressMode = false
+                        MediaUploadHaptics.uploadFailed()
+                        self.presentRecordedUploadFailures()
+                        self.releaseUploadRetention()
+                    } else {
+                        // Keep failed items and restore compose so the user can retry or Cancel out.
+                        self.shareItemController.remove(self.uploadSuccess)
+                        self.exitSendProgressMode()
+                        self.updateCompressionOptionsUI()
+                        MediaUploadHaptics.uploadFailed()
+                        self.presentRecordedUploadFailures()
+                    }
+
+                    bgTask.stopBackgroundTask()
+                }
+                self.runWhenComposeDismissSettled(settle)
             }
         }
 
-        self.uploadGroup.notify(queue: .main) {
-            self.isUploadingMedia = false
-            self.isPreparingForUpload = false
-            self.uploadTasks.removeAll()
-            self.albumShareSession = nil
-
-            let settle: () -> Void = { [weak self] in
-                guard let self else { return }
-                // Instant dismiss so the branded card cannot flash into the next share session.
-                self.hideProgressAlert(animated: false)
-
+        // Ensure Talk attachment folder exists once before parallel PUTs (avoids 404/MKCOL races on new accounts).
+        if draftFolderPath == nil {
+            NCLog.log("Media upload: ensuring attachment folder before parallel PUTs")
+            NCAPIController.sharedInstance().checkOrCreateAttachmentFolder(forAccount: self.account) { created, statusCode in
                 if self.mediaFlowCancelled {
-                    NCLog.log("Media upload: upload group finished after cancel — suppressing result UI")
-                    self.hideProgressAlert(animated: false)
-                    if self.composeDismissedForUpload {
-                        // In-app: compose already gone — finish leave cleanup.
-                        self.isInSendProgressMode = false
-                        self.restoreExtensionProgressChromeIfNeeded()
-                        self.releaseUploadRetention()
-                    } else if self.isInSendProgressMode {
-                        // Race: cancel path hadn't restored compose yet.
-                        self.exitSendProgressMode()
-                    } else {
-                        self.restoreExtensionProgressChromeIfNeeded()
-                    }
-                    self.mediaFlowCancelled = false
-                    self.updateSendButtonEnabledState()
+                    self.isUploadingMedia = false
                     bgTask.stopBackgroundTask()
                     return
                 }
-
-                // TODO: Do error reporting per item
-                if self.uploadErrors.isEmpty {
+                guard created else {
+                    NCLog.log("Media upload: attachment folder prepare failed (status=\(statusCode))")
+                    self.isUploadingMedia = false
+                    self.isPreparingForUpload = false
                     self.isInSendProgressMode = false
-                    self.finishingSuccessfulUpload = true
-                    self.shareItemController.removeAllItems()
-                    self.finishingSuccessfulUpload = false
-                    MediaUploadHaptics.uploadSucceeded()
-                    self.releaseUploadRetention()
-                    self.delegate?.shareConfirmationViewControllerDidFinish(self)
-                } else if self.composeDismissedForUpload {
-                    // Compose sheet already gone — surface the error on the chat host.
-                    self.isInSendProgressMode = false
-                    MediaUploadHaptics.uploadFailed()
-                    self.presentRecordedUploadFailures()
-                    self.releaseUploadRetention()
-                } else {
-                    // Keep failed items and restore compose so the user can retry or Cancel out.
-                    self.shareItemController.remove(self.uploadSuccess)
-                    self.exitSendProgressMode()
-                    self.updateCompressionOptionsUI()
-                    MediaUploadHaptics.uploadFailed()
-                    self.presentRecordedUploadFailures()
+                    self.albumShareSession = nil
+                    let message = NCAPIController.userFacingFileUploadError(code: statusCode)
+                    let settle = {
+                        self.hideProgressAlert()
+                        if self.composeDismissedForUpload {
+                            self.presentUploadFailureOnHost(message: message)
+                            self.releaseUploadRetention()
+                        } else {
+                            self.exitSendProgressMode()
+                            self.presentUploadFailureOnHost(message: message)
+                        }
+                        bgTask.stopBackgroundTask()
+                    }
+                    self.runWhenComposeDismissSettled(settle)
+                    return
                 }
-
-                bgTask.stopBackgroundTask()
+                launchParallelUploads()
             }
-            self.runWhenComposeDismissSettled(settle)
+        } else {
+            launchParallelUploads()
         }
     }
 
@@ -2104,7 +2142,7 @@ import AVFoundation
                         }
                         if created {
                             // Retry acquires its own gate slot; release this one via defer above.
-                            self.uploadFile(to: fileServerURL, with: filePath, draftFolderPath: nil, with: item)
+                            self.uploadFile(to: fileServerURL, with: filePath, draftFolderPath: draftFolderPath, with: item)
                         } else {
                             MediaUploadTrace.log("UPLOAD FAIL \(uploadName) code=\(nkError.errorCode) folder-create \(nkError.errorDescription)")
                             self.recordUploadError(code: nkError.errorCode, fileName: uploadName, technical: nkError.errorDescription)

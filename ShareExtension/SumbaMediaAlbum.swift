@@ -129,6 +129,20 @@ enum SumbaMediaAlbum {
         return deduped.reversed()
     }
 
+    /// Replace one album member (typically after edit) and re-collapse for display.
+    static func replacingMember(in primary: NCChatMessage, with updatedMember: NCChatMessage) -> NCChatMessage? {
+        guard let members = primary.sumbaAlbumMembers, members.count >= 2 else { return nil }
+        var pool = members.map { member -> NCChatMessage in
+            clearAlbumState(member)
+            return member
+        }
+        guard let index = pool.firstIndex(where: { $0.isSameMessage(primary) || $0.isSameMessage(updatedMember) }) else {
+            return nil
+        }
+        pool[index] = updatedMember
+        return collapseForDisplay(pool).first
+    }
+
     /// Merge `incoming` into an existing album primary in `section` when uuid matches; returns true if consumed.
     static func mergeIncoming(_ incoming: NCChatMessage, into section: inout [NCChatMessage]) -> Bool {
         guard let incomingRef = parse(incoming.referenceId), incoming.file() != nil else { return false }

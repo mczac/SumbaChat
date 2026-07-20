@@ -211,6 +211,38 @@ import SwiftyAttributes
         return resultMessage
     }
 
+    /// Text shown under file/album previews — strips synthetic album push captions and `{file}`.
+    public var chatBodyAttributedText: NSAttributedString? {
+        if SumbaMediaAlbumReference.parse(self.referenceId) != nil || self.sumbaIsAlbumPrimary {
+            let raw = (self.message as String?)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(self.message), userCaption == raw {
+                return self.parsedMarkdownForChat()
+            }
+            if let userCaption = SumbaMediaAlbumReference.cleanedUserCaption(self.message) {
+                let attributed = NSMutableAttributedString(string: userCaption)
+                return self.isMarkdownMessage
+                    ? SwiftMarkdownObjCBridge.parseMarkdown(markdownString: attributed)
+                    : attributed
+            }
+            return nil
+        }
+        if self.message == "{file}", self.file() != nil {
+            return nil
+        }
+        return self.parsedMarkdownForChat()
+    }
+
+    /// Text to pre-fill the edit composer — strips album push captions and `{file}` placeholders.
+    public var editableCaptionText: String {
+        if SumbaMediaAlbumReference.parse(self.referenceId) != nil || self.sumbaIsAlbumPrimary {
+            return SumbaMediaAlbumReference.cleanedUserCaption(self.message) ?? ""
+        }
+        if self.message == "{file}", self.file() != nil {
+            return ""
+        }
+        return self.parsedMessage().string
+    }
+
     /// 'Hello {mention-user1}' -> 'Hello @User1 Displayname'
     public var sendingMessageWithDisplayNames: String? {
         guard var resultMessage = self.message else { return nil }

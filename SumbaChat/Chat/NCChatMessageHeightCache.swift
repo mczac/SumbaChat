@@ -34,4 +34,8 @@ public class NCChatMessageHeightCache {
         self.internalCache.removeObject(forKey: getCacheKey(forMessage: message))
     }
 
+    public func invalidateAll() {
+        self.internalCache.removeAllObjects()
+    }
+
 }
