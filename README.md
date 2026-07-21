@@ -34,7 +34,7 @@ This repository is **SumbaChat**, not the upstream Nextcloud Talk project. Upstr
       SumbaChat/Settings/NCAppBrandingLocal.h
    ```
 
-   Edit `NCAppBrandingLocal.h` with your cloud URL, push proxies, base domain, default subdomain, support email, and privacy `uid` XOR key. That file is **gitignored** — never commit real hostnames or keys. Without it, the app falls back to `example.com` placeholders.
+   Edit `NCAppBrandingLocal.h` with your cloud URL, push proxies, base domain, default subdomain, support email, and privacy `uid` key. That file is **gitignored** — never commit real hostnames or keys. Without it, the app falls back to `example.com` placeholders.
 
 4. Bundle id / App Group are already set for SumbaChat (`com.spl.SumbaChat` / `group.com.spl.SumbaChat`). Use a team that can sign those identifiers, or change them in the Xcode targets and in `NCAppBranding.m` together.
 
@@ -49,7 +49,7 @@ Pull requests should stay SwiftLint-clean.
 - Forgot password flow
 - Contact us (mailto to the configured support address)
 - Delete account from Account screen when `sumbachat-client.accountRetire.enabled` (password → countdown → `DELETE talk_upload_policy/api/v1/account` → local logout). Profile removed; shared project content stays archived under “Former Team Member” (see Privacy Policy)
-- Privacy policy URL comes from gitignored `NCAppBrandingLocal.h` (`privacyURL`); opens with `?uid=` set to a hex XOR of the Nextcloud user id
+- Privacy policy URL comes from gitignored `NCAppBrandingLocal.h` (`privacyURL`); opens with an encoded `?uid=` query parameter when logged in
 - Source code link to the SumbaChat GitHub repository
 - Online presence restore for branded clients (including first login when no user-status row exists yet)
 
